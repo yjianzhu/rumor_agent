@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="h-full">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Rumor Agent{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+  <style>
+    [htmx-indicator] { display: none; }
+    .htmx-request [htmx-indicator] { display: inline-block; }
+    .htmx-request.htmx-indicator { display: inline-block; }
+  </style>
+</head>
+<body class="h-full bg-gray-50 text-gray-900">
+  <!-- Nav -->
+  <nav class="sticky top-0 z-30 bg-white border-b border-gray-200 shadow-sm">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="flex items-center justify-between h-14">
+        <a href="/" class="text-lg font-semibold tracking-tight text-gray-800">Rumor Agent</a>
+        <a href="/docs" target="_blank" class="text-xs text-gray-400 hover:text-gray-600">API Docs</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

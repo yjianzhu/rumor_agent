@@ -1,0 +1,18 @@
+{% set status_labels = {'FAKE': '虚假', 'TRUE': '真实', 'DUBIOUS': '存疑', 'OUTDATED': '过时'} %}
+{% set status_text_colors = {'FAKE': 'text-red-600', 'TRUE': 'text-green-600', 'DUBIOUS': 'text-yellow-600', 'OUTDATED': 'text-gray-500'} %}
+
+<div class="flex flex-wrap items-center gap-4 text-sm text-gray-600 mb-5 bg-white border border-gray-200 rounded-lg px-4 py-3">
+  <span>
+    共 <strong class="text-gray-900">{{ stats.total }}</strong> 条
+  </span>
+  <span class="text-gray-300">|</span>
+  {% for s, count in stats.by_status.items() %}
+  <span class="{{ status_text_colors.get(s, '') }}">
+    {{ status_labels.get(s, s) }} <strong>{{ count }}</strong>
+  </span>
+  {% endfor %}
+  <span class="text-gray-300">|</span>
+  <span>已发布 <strong>{{ stats.published }}</strong></span>
+  <span class="text-gray-300">|</span>
+  <span>近 7 天 <strong>{{ stats.recent_7d }}</strong></span>
+</div>

@@ -1,0 +1,34 @@
+{% set status_colors = {
+  'FAKE': 'bg-red-500',
+  'TRUE': 'bg-green-500',
+  'DUBIOUS': 'bg-yellow-500',
+  'OUTDATED': 'bg-gray-400'
+} %}
+
+<a href="/rumors/{{ rumor.slug }}" class="block bg-white rounded-lg border border-gray-200 p-4 hover:shadow-md transition-shadow">
+  <!-- Header: status + date -->
+  <div class="flex items-center justify-between mb-2">
+    <span class="px-2 py-0.5 rounded text-xs font-medium text-white {{ status_colors.get(rumor.status.value, 'bg-gray-400') }}">
+      {{ rumor.status.value }}
+    </span>
+    <span class="text-xs text-gray-400">{{ rumor.created_at.strftime('%Y-%m-%d') }}</span>
+  </div>
+
+  <!-- Title -->
+  <h3 class="text-sm font-semibold text-gray-800 line-clamp-2 mb-1">{{ rumor.title }}</h3>
+
+  <!-- Preview -->
+  <p class="text-xs text-gray-500 line-clamp-3 mb-3">{{ rumor.summary or rumor.rumor_content or '' }}</p>
+
+  <!-- Tags -->
+  {% if rumor.tags %}
+  <div class="flex flex-wrap gap-1">
+    {% for t in rumor.tags[:4] %}
+    <span class="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">#{{ t }}</span>
+    {% endfor %}
+    {% if rumor.tags | length > 4 %}
+    <span class="text-xs text-gray-400">+{{ rumor.tags | length - 4 }}</span>
+    {% endif %}
+  </div>
+  {% endif %}
+</a>
