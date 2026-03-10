@@ -1,21 +1,30 @@
-import os
-from dotenv import load_dotenv
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
-load_dotenv()
 
-class Config:
-    DB_USER = os.getenv("DB_USER", "postgres")
-    DB_PASSWORD = os.getenv("DB_PASSWORD", "password")
-    DB_HOST = os.getenv("DB_HOST", "localhost")
-    DB_PORT = os.getenv("DB_PORT", "5432")
-    DB_NAME = os.getenv("DB_NAME", "rumor_agent")
-    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-    OPENAI_API_BASE = os.getenv("OPENAI_API_BASE")
-    LLM_MODEL = os.getenv("LLM_MODEL", "openai/gpt-4o-mini")
-    LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0"))
-    
+class Config(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    DB_USER: str = "postgres"
+    DB_PASSWORD: str = "password"
+    DB_HOST: str = "localhost"
+    DB_PORT: str = "5432"
+    DB_NAME: str = "rumor_agent"
+
+    LLM_API_KEY: str | None = None
+    LLM_API_BASE: str | None = None
+    LLM_MODEL: str = "openai/gpt-4o-mini"
+    LLM_TEMPERATURE: float = 0.0
+    LLM_MAX_RETRIES: int = 3
+    LLM_MAX_INPUT_CHARS: int = 30000
+    MEDIA_DIR: str = "media"
+    IMPORT_BATCH_SIZE: int = 50
+    EMBEDDING_MODEL: str = "openai/text-embedding-3-small"
+    EMBEDDING_DIM: int = 1536
+    DEDUP_SIMILARITY_THRESHOLD: float = 0.92
+
     @property
-    def DATABASE_URL(self):
+    def DATABASE_URL(self) -> str:
         return f"postgresql://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
+
 
 settings = Config()

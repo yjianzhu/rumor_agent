@@ -1,8 +1,13 @@
 import json
+import logging
 from uuid import uuid4
 
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+
 from src.config import settings
-from src.db.schemas import RumorSampleIn, StructuredRumorAnalysis
+from src.db.schemas import _RumorSampleIn, StructuredRumorAnalysis
+
+logger = logging.getLogger(__name__)
 
 
 PROMPT = """You convert rumor samples into structured database-ready records.
@@ -25,18 +30,18 @@ class AdkLlmClient:
         self.model = model or settings.LLM_MODEL
         self.temperature = settings.LLM_TEMPERATURE if temperature is None else temperature
 
-        if not settings.OPENAI_API_KEY:
-            raise ValueError("OPENAI_API_KEY is required for LLM analysis")
-
         from google.adk.agents import LlmAgent
         from google.adk.models.lite_llm import LiteLlm
         from google.adk.runners import Runner
         from google.adk.sessions import InMemorySessionService
         from google.genai import types
 
-        model_kwargs: dict[str, object] = {"api_key": settings.OPENAI_API_KEY}
-        if settings.OPENAI_API_BASE:
-            model_kwargs["api_base"] = settings.OPENAI_API_BASE
+        model_kwargs: dict[str, object] = {}
+        if settings.LLM_API_KEY:
+            model_kwargs["api_key"] = settings.LLM_API_KEY
+        if settings.LLM_API_BASE:
+            model_kwargs["api_base"] = settings.LLM_API_BASE
+
 
         self._types = types
         self._output_key = "structured_result"
@@ -47,7 +52,7 @@ class AdkLlmClient:
             name="rumor_structurer",
             model=LiteLlm(model=self.model, **model_kwargs),
             instruction=PROMPT,
-            input_schema=RumorSampleIn,
+            input_schema=_RumorSampleIn,
             output_schema=StructuredRumorAnalysis,
             output_key=self._output_key,
             generate_content_config=types.GenerateContentConfig(temperature=self.temperature),
@@ -58,7 +63,14 @@ class AdkLlmClient:
             session_service=self._session_service,
         )
 
-    def analyze(self, sample: RumorSampleIn) -> StructuredRumorAnalysis:
+    @retry(
+        stop=stop_after_attempt(settings.LLM_MAX_RETRIES),
+        wait=wait_exponential(multiplier=1, min=2, max=60),
+        retry=retry_if_exception_type((ConnectionError, TimeoutError)),
+        reraise=True,
+    )
+    def analyze(self, sample: _RumorSampleIn) -> StructuredRumorAnalysis:
+        sample = self._truncate_input(sample)
         session = self._session_service.create_session_sync(
             app_name=self._app_name,
             user_id=self._user_id,
@@ -98,3 +110,26 @@ class AdkLlmClient:
         if isinstance(payload, str):
             return json.loads(payload)
         raise TypeError(f"Unsupported payload type: {type(payload)!r}")
+
+    def _truncate_input(self, sample: _RumorSampleIn) -> _RumorSampleIn:
+        text = sample.raw_text
+        max_chars = settings.LLM_MAX_INPUT_CHARS
+        try:
+            import litellm
+            token_count = litellm.token_counter(model=self.model, text=text)
+            model_max = litellm.get_max_tokens(self.model) or 128_000
+            limit = int(model_max * 0.7)
+            if token_count > limit:
+                ratio = limit / token_count
+                truncated = text[: int(len(text) * ratio)]
+                logger.warning(
+                    "Input truncated from %d to ~%d tokens (model limit %d)",
+                    token_count, limit, model_max,
+                )
+                return sample.model_copy(update={"raw_text": truncated})
+        except Exception:
+            pass
+        if len(text) > max_chars:
+            logger.warning("Input truncated from %d to %d chars (fallback)", len(text), max_chars)
+            return sample.model_copy(update={"raw_text": text[:max_chars]})
+        return sample

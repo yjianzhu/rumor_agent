@@ -1,6 +1,6 @@
 # Rumor Agent - 项目开发 TODO
 
-> 更新时间：2026-02-27
+> 更新时间：2026-03-10
 >
 > **项目目标**：构建一个智能辟谣 Agent 系统，能够自动爬取网络谣言案例、存入数据库，并通过 LLM Agent 完成事实核查、分类与分析，最终输出结构化的辟谣结果。
 
@@ -11,10 +11,10 @@
 | 阶段 | 描述 | 状态 |
 |------|------|------|
 | Phase 0 | 基础设施 & 数据库 | ✅ 已完成 |
-| Phase 1 | 数据库接入层（CRUD） | 🚧 进行中 |
+| Phase 1 | 数据库接入层（CRUD） | ✅ 已完成 |
 | Phase 2 | 爬虫 Agent（案例采集） | ⬜ 未开始 |
-| Phase 3 | 主程序流程串联 | ⬜ 未开始 |
-| Phase 4 | LLM 分析核心（可选扩展） | ⬜ 未开始 |
+| Phase 3 | 主程序流程串联 | ✅ 已完成 |
+| Phase 4 | LLM 分析核心 | ✅ 基本完成（批量分析待实现） |
 
 ---
 
@@ -30,32 +30,30 @@
 
 ---
 
-## Phase 1：数据库接入层（CRUD Repository）🚧
+## Phase 1：数据库接入层（CRUD Repository）✅
 
 > **目标**：封装对数据库的增删改查操作，供爬虫模块和主程序调用，避免业务逻辑直接操作 Session。
 
-### 1.1 创建 `src/db/crud.py`
-- [ ] `create_rumor(db, rumor_data: dict) -> Rumor`
-  - 插入一条谣言记录；若 `slug` 已存在则跳过（幂等写入）
-- [ ] `get_rumor_by_slug(db, slug: str) -> Rumor | None`
-  - 按 slug 查询，用于判断重复
-- [ ] `get_rumor_by_id(db, rumor_id: UUID) -> Rumor | None`
-- [ ] `list_rumors(db, status=None, limit=50, offset=0) -> list[Rumor]`
-  - 支持按状态过滤、分页
-- [ ] `update_rumor_status(db, rumor_id: UUID, status: RumorStatus) -> Rumor`
-- [ ] `delete_rumor(db, rumor_id: UUID) -> bool`
-- [ ] `create_analysis_result(db, rumor_id: UUID, result_data: dict) -> AnalysisResult`
-- [ ] `get_analysis_by_rumor_id(db, rumor_id: UUID) -> AnalysisResult | None`
+### 1.1 `src/db/crud.py`
+- [x] `create_rumor(db, data: RumorCreate) -> Rumor` — slug 唯一性校验
+- [x] `get_rumor_by_slug(db, slug: str) -> Rumor | None`
+- [x] `get_rumor_by_id(db, rumor_id: UUID) -> Rumor | None`
+- [x] `list_rumors(db, status, tag, is_published, offset, limit)` — 支持状态/标签/发布过滤 + 分页
+- [x] `count_rumors(db) -> int`
+- [x] `update_rumor(db, rumor_id, data: RumorUpdate)` — 任意字段更新
+- [x] `delete_rumor(db, rumor_id: UUID) -> bool`
+- [x] `create_analysis_result(db, data: AnalysisResultCreate) -> AnalysisResult`
+- [x] `get_analysis_by_rumor_id(db, rumor_id: UUID) -> AnalysisResult | None`
 
-### 1.2 创建 `src/db/schemas.py`（数据验证 Schema）
-- [ ] 定义 `RumorCreate` — 创建谣言时所需字段（title, summary, rumor_content, source_urls 等）
-- [ ] 定义 `RumorOut` — 返回谣言时的展示字段
-- [ ] 定义 `AnalysisResultCreate` — 创建分析结果所需字段
-- [ ] 定义 `AnalysisResultOut` — 返回分析结果的展示字段
+### 1.2 `src/db/schemas.py`
+- [x] `RumorCreate` / `RumorUpdate` / `RumorOut` — 谣言增改查 Schema
+- [x] `RumorDirectIn` — JSONL 直接导入 Schema（含可选 analysis 字段）
+- [x] `_RumorSampleIn` — 内部 MD → LLM 输入包装
+- [x] `StructuredRumorAnalysis` — LLM 结构化输出 Schema
+- [x] `AnalysisResultCreate` / `AnalysisResultOut`
 
-### 1.3 测试数据库接入
-- [ ] 在 `scripts/test_crud.py` 中编写简单测试
-  - 测试插入、查询、更新、去重逻辑
+### 1.3 测试
+- [x] `tests/test_import_pipeline.py` — 13 个测试覆盖 JSONL/MD 导入 + DB 集成
 
 ---
 
@@ -102,99 +100,95 @@
 
 ---
 
-## Phase 3：主程序流程串联 ⬜
+## Phase 3：主程序流程串联 ✅
 
-> **目标**：整合爬虫 Agent 与数据库接入层，提供统一的命令行入口，支持完整的"爬取 → 存储 → 查询"流程。
+> **目标**：整合分析流水线与数据库接入层，提供统一的命令行入口。
 
-### 3.1 重构 `src/main.py`
-- [ ] 添加命令行参数解析（使用 `argparse`）
-  - `--crawl` — 执行爬虫采集流程
-  - `--source [piyao|qq_fact|all]` — 指定数据源
-  - `--limit N` — 每个数据源最多爬取条数
-  - `--list` — 列出数据库中现有谣言记录
-  - `--analyze` — 触发 LLM 分析（Phase 4 扩展）
-- [ ] 集成日志模块（`logging`），统一输出格式
+### 3.1 `src/main.py` CLI
+- [x] `--import-jsonl FILE` — JSONL 直接导入（无需 LLM）
+- [x] `--import-md FILE` — Markdown 经 LLM 分析后导入
+- [x] `--limit N` — 限制处理条数
+- [x] `--dry-run` — 预览模式，不写库
+- [x] `--model MODEL` — 覆盖默认 LLM 模型
+- [x] Slug 去重（base slug + hash suffix 回退）
+- [x] 事务安全（失败时 `cleanup_rumor_bundle` 回滚）
+- [x] 导入统计（processed / succeeded / failed / duplicates）
 
-### 3.2 配置管理扩展 `src/config.py`
-- [ ] 添加 LLM API Key 配置（`GEMINI_API_KEY` / `OPENAI_API_KEY`）
-- [ ] 添加爬虫相关配置（`CRAWL_DELAY`, `MAX_RETRIES`）
-- [ ] 更新 `.env.example` 文件
+### 3.2 配置管理 `src/config.py`
+- [x] `LLM_API_KEY` / `LLM_API_BASE` — LLM 凭据（通用，不锁定 OpenAI）
+- [x] `LLM_MODEL` — 默认 `openai/gpt-4o-mini`
+- [x] `LLM_TEMPERATURE` — 默认 0.0
+- [ ] 爬虫相关配置（`CRAWL_DELAY`, `MAX_RETRIES`）— 待 Phase 2
 
-### 3.3 完善日志系统
-- [ ] `src/logger.py` — 统一日志配置
-  - 输出到控制台 + 日志文件（`logs/rumor_agent.log`）
-  - 支持 DEBUG / INFO / WARNING / ERROR 等级
+### 3.3 日志系统 `src/logger.py`
+- [x] Console + 文件日志（`logs/rumor_agent.log`）
+- [x] 格式：`[TIMESTAMP] [LEVEL] module: message`
 
 ### 3.4 端到端测试
-- [ ] 运行完整流程：`python -m src.main --crawl --source all --limit 20`
-- [ ] 验证数据库记录数量增加、字段完整性
+- [x] 13 个测试全部通过（JSONL 单元 + MD 单元 + DB 集成）
+- [ ] 真实 LLM 端到端测试（需 API Key）
 
 ---
 
-## Phase 4：LLM 分析核心（扩展）⬜
+## Phase 4：LLM 分析核心 ✅（批量分析待实现）
 
-> **目标**：基于 LLM（Gemini / OpenAI）对已采集的谣言进行事实核查、真假分类、可信度评分。
+> **目标**：基于 LLM 对谣言进行结构化提取、真假分类、可信度评分。
 
-### 4.1 LLM 客户端集成
-- [ ] `src/llm/client.py` — 封装 LLM API 调用
-  - 支持 Gemini Pro / GPT-4
-- [ ] `src/llm/prompts.py` — Prompt 模板管理
-  - 事实核查 Prompt
-  - 分类与评分 Prompt
+### 4.1 LLM 客户端 `src/llm/client.py`
+- [x] `AdkLlmClient` — Google ADK + LiteLLM 封装
+- [x] 支持多模型（OpenAI / Gemini 等，通过 LiteLLM 路由）
+- [x] 结构化输出：`_RumorSampleIn` → `StructuredRumorAnalysis`
+- [x] Prompt 内嵌于 client.py（规则：不声称外部核查、evidence 仅引用输入文本）
 
-### 4.2 分析器模块
-- [ ] `src/analyzer/analyzer.py`
-  - `analyze_rumor(rumor: Rumor) -> AnalysisResultCreate`
-  - 调用 LLM 获取 `truthfulness_score`, `evidence`, `summary`
-  - 将结果写入 `analysis_results` 表
+### 4.2 分析器 `src/analyzer/analyzer.py`
+- [x] `analyze_sample(sample)` — LLM 分析入口
+- [x] `analyze_markdown(path)` — 读取 MD 文件并分析
+- [x] `normalize_structured_analysis()` — 后处理（去重 tags、合并 URLs、verdict signal 校验）
+- [x] `has_explicit_verdict_signal()` — 中英文关键词匹配，无信号强制 DUBIOUS
+- [x] `slugify()` / `hash_suffix()` / `to_rumor_create()` 等工具函数
 
 ### 4.3 批量分析
-- [ ] 支持主程序通过 `--analyze` 参数触发对未分析记录的批量处理
+- [ ] 支持 `--analyze` 参数对未分析记录批量处理
 
 ---
 
-## 目录结构规划（最终）
+## 目录结构（当前实际）
 
 ```
 rumor_agent/
 ├── .env                        # 环境变量（不入 Git）
-├── .env.example                # 环境变量模板
-├── init_db.py                  # 数据库初始化脚本（✅已完成）
+├── init_db.py                  # 数据库初始化脚本
 ├── requirements.txt            # 项目依赖
-├── TODO.md                     # 本文件
-├── README.md                   # 项目说明
+├── conftest.py                 # pytest 根配置
+├── TODO.md / README.md / AGENTS.md
 ├── logs/                       # 日志输出目录
+├── examples/
+│   └── 小米景明汽车谣言.md     # 示例谣言 MD
 ├── scripts/
-│   ├── check_database.py       # 数据库连接验证（✅已完成）
-│   ├── test_crud.py            # CRUD 操作测试
-│   └── run_crawler.py          # 爬虫独立运行脚本
+│   ├── check_database.py       # 数据库连接验证
+│   ├── make_jsonl.py           # MD → JSONL 转换
+│   └── verify_import.py        # 导入验证
+├── tests/
+│   └── test_import_pipeline.py # 导入流水线测试（13 个）
 └── src/
-    ├── config.py               # 配置管理（✅已完成）
-    ├── logger.py               # 日志配置
-    ├── main.py                 # 主程序入口（⬜待重构）
+    ├── config.py               # 配置管理 ✅
+    ├── logger.py               # 日志系统 ✅
+    ├── main.py                 # CLI 入口 ✅
     ├── db/
-    │   ├── base.py             # SQLAlchemy 基础（✅已完成）
-    │   ├── models.py           # ORM 模型（✅已完成）
-    │   ├── crud.py             # CRUD 操作层（⬜待创建）
-    │   └── schemas.py          # 数据 Schema（⬜待创建）
-    ├── crawler/
-    │   ├── __init__.py
-    │   ├── base_crawler.py     # 基础爬虫抽象类（⬜待创建）
-    │   ├── piyao_crawler.py    # 辟谣网爬虫（⬜待创建）
-    │   ├── qq_fact_crawler.py  # 腾讯较真爬虫（⬜待创建）
-    │   ├── agent.py            # 爬虫 Agent 控制器（⬜待创建）
-    │   └── utils.py            # 工具函数（⬜待创建）
+    │   ├── base.py             # SQLAlchemy 基础 ✅
+    │   ├── models.py           # ORM 模型 ✅
+    │   ├── schemas.py          # Pydantic Schema ✅
+    │   └── crud.py             # CRUD 操作层 ✅
     ├── analyzer/
-    │   └── analyzer.py         # LLM 分析器（⬜待创建，Phase 4）
+    │   └── analyzer.py         # 分析器 + 后处理 ✅
     └── llm/
-        ├── client.py           # LLM 客户端（⬜待创建，Phase 4）
-        └── prompts.py          # Prompt 模板（⬜待创建，Phase 4）
+        └── client.py           # ADK + LiteLLM 客户端 ✅
 ```
 
 ---
 
 ## 当前下一步行动
 
-1. **立即开始 Phase 1**：创建 `src/db/crud.py` 和 `src/db/schemas.py`
-2. **调研爬虫目标**：访问辟谣相关网站，分析页面结构，确定 Phase 2 的数据源
-3. **更新 `requirements.txt`**：添加 `httpx`, `beautifulsoup4`, `lxml` 等爬虫依赖
+1. **Phase 2 — 爬虫 Agent**：确定目标数据源，开始实现采集模块
+2. **批量分析**：实现 `--analyze` 参数对已入库但未分析的记录进行批量 LLM 处理
+3. **小改进**：`src/db/base.py` 中 `declarative_base()` 迁移到 SQLAlchemy 2.0 `DeclarativeBase`

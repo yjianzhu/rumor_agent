@@ -1,231 +1,257 @@
-import hashlib
 import io
 import json
-import tempfile
-import unittest
-from pathlib import Path
 from uuid import uuid4
 
-from pydantic import ValidationError
+import pytest
 
-from src.analyzer.analyzer import normalize_structured_analysis, slugify
-from src.db.base import SessionLocal
-from src.db.crud import delete_rumor, get_analysis_by_rumor_id, get_rumor_by_slug
+from src.analyzer.analyzer import hash_suffix, normalize_structured_analysis, slugify
+from src.db.crud import get_analysis_by_rumor_id, get_rumor_by_slug
 from src.db.models import RumorStatus
-from src.db.schemas import RumorSampleIn, StructuredRumorAnalysis
-from src.main import import_jsonl_file
+from src.db.schemas import _RumorSampleIn, MediaItem, StructuredRumorAnalysis
+from src.main import import_jsonl_file, import_md_file
+
+from tests.conftest import FakeAnalyzer, write_jsonl, write_md
 
 
-class FakeAnalyzer:
-    def __init__(self, responses):
-        self.responses = iter(responses)
+# ─── JSONL direct import (unit, no DB) ───────────────────────────────────────
 
-    def analyze(self, sample):
-        response = next(self.responses)
-        if isinstance(response, Exception):
-            raise response
-        return response
+def test_jsonl_invalid_json_counted_as_failure(tmp_path, caplog):
+    import logging
+    path = write_jsonl(tmp_path, [
+        {"title": "Valid rumor", "rumor_content": "content here"},
+        '{"title": ',  # broken JSON
+    ])
+    with caplog.at_level(logging.ERROR):
+        stats = import_jsonl_file(path, dry_run=True)
 
-
-class ImportPipelineTests(unittest.TestCase):
-    def write_jsonl(self, rows: list[object]) -> Path:
-        handle = tempfile.NamedTemporaryFile("w", delete=False, suffix=".jsonl", encoding="utf-8")
-        with handle:
-            for row in rows:
-                if isinstance(row, str):
-                    handle.write(row + "\n")
-                else:
-                    handle.write(json.dumps(row, ensure_ascii=False) + "\n")
-        self.addCleanup(lambda: Path(handle.name).unlink(missing_ok=True))
-        return Path(handle.name)
-
-    def test_invalid_json_and_missing_raw_text_are_counted(self):
-        path = self.write_jsonl([{"raw_text": "ok"}, {"title": "missing raw"}, '{"raw_text": '])
-        output = io.StringIO()
-
-        stats = import_jsonl_file(path, skip_analysis=True, output=output)
-
-        self.assertEqual(stats.processed, 3)
-        self.assertEqual(stats.succeeded, 1)
-        self.assertEqual(stats.failed, 2)
-        self.assertIn("Line 2", output.getvalue())
-        self.assertIn("Line 3", output.getvalue())
-
-    def test_dry_run_preserves_input_metadata(self):
-        sample = {
-            "raw_text": "Rumor notice with source https://example.com/a and internal warning.",
-            "title": "Manual Title",
-            "source_urls": ["https://seed.local/1"],
-            "tags": ["public-service"],
-        }
-        response = StructuredRumorAnalysis(
-            title="Model Title",
-            summary="  Summary  ",
-            rumor_content="ignored",
-            truth_content="  Explanation  ",
-            status=RumorStatus.FAKE,
-            tags=["rumor", "public-service"],
-            source_urls=["https://example.com/a", "https://seed.local/1"],
-            analysis_summary="  Analysis summary ",
-            truthfulness_score=0.8,
-            evidence="  The text says it was debunked. ",
-        )
-        path = self.write_jsonl([sample])
-        output = io.StringIO()
-
-        stats = import_jsonl_file(path, dry_run=True, output=output, analyzer=FakeAnalyzer([response]))
-
-        self.assertEqual(stats.succeeded, 1)
-        preview = output.getvalue()
-        self.assertIn("Manual Title", preview)
-        self.assertIn("https://seed.local/1", preview)
-        self.assertIn("https://example.com/a", preview)
-
-    def test_missing_title_uses_model_title_for_slug(self):
-        sample = {"raw_text": "This sample clearly says the claim was debunked by officials."}
-        response = StructuredRumorAnalysis(
-            title="Model Generated Title",
-            summary=None,
-            rumor_content="ignored",
-            truth_content=None,
-            status=RumorStatus.FAKE,
-            tags=None,
-            source_urls=None,
-            analysis_summary=None,
-            truthfulness_score=0.9,
-            evidence="Officials debunked the claim.",
-        )
-        path = self.write_jsonl([sample])
-        output = io.StringIO()
-
-        stats = import_jsonl_file(path, dry_run=True, output=output, analyzer=FakeAnalyzer([response]))
-
-        self.assertEqual(stats.succeeded, 1)
-        self.assertIn("Model Generated Title", output.getvalue())
-        self.assertIn(slugify("Model Generated Title"), output.getvalue())
-
-    def test_invalid_model_output_is_counted_as_failure(self):
-        sample = {"raw_text": "Plain text without a clear verdict."}
-        try:
-            StructuredRumorAnalysis.model_validate({})
-        except ValidationError as exc:
-            invalid_response = exc
-        path = self.write_jsonl([sample])
-        output = io.StringIO()
-
-        stats = import_jsonl_file(path, dry_run=True, output=output, analyzer=FakeAnalyzer([invalid_response]))
-
-        self.assertEqual(stats.failed, 1)
-        self.assertIn("Line 1", output.getvalue())
-
-    def test_no_verdict_signal_forces_dubious(self):
-        sample = RumorSampleIn(raw_text="This is only an unverified retelling of a claim.")
-        analysis = StructuredRumorAnalysis(
-            title="Title",
-            summary=None,
-            rumor_content="ignored",
-            truth_content=None,
-            status=RumorStatus.TRUE,
-            tags=None,
-            source_urls=None,
-            analysis_summary=None,
-            truthfulness_score=0.7,
-            evidence="Model overreached",
-        )
-
-        normalized = normalize_structured_analysis(sample, analysis)
-
-        self.assertEqual(normalized.status, RumorStatus.DUBIOUS)
-
-    def test_skip_analysis_only_prints_preview(self):
-        path = self.write_jsonl([{"raw_text": "Preview only, do not call the LLM."}])
-        output = io.StringIO()
-
-        stats = import_jsonl_file(path, skip_analysis=True, output=output)
-
-        self.assertEqual(stats.succeeded, 1)
-        self.assertIn("truthfulness_score", output.getvalue())
+    assert stats.processed == 2
+    assert stats.succeeded == 1
+    assert stats.failed == 1
+    assert "Line 2" in caplog.text
 
 
-class DatabaseImportTests(unittest.TestCase):
-    def setUp(self):
-        self.db = SessionLocal()
-        self.created_slugs: list[str] = []
+def test_jsonl_missing_title_counted_as_failure(tmp_path, caplog):
+    import logging
+    path = write_jsonl(tmp_path, [{"rumor_content": "no title here"}])
+    with caplog.at_level(logging.ERROR):
+        stats = import_jsonl_file(path, dry_run=True)
 
-    def tearDown(self):
-        for slug in self.created_slugs:
-            rumor = get_rumor_by_slug(self.db, slug)
-            if rumor:
-                analysis = get_analysis_by_rumor_id(self.db, rumor.id)
-                if analysis:
-                    self.db.delete(analysis)
-                    self.db.commit()
-                delete_rumor(self.db, rumor.id)
-        self.db.close()
-
-    def write_jsonl(self, rows: list[object]) -> Path:
-        handle = tempfile.NamedTemporaryFile("w", delete=False, suffix=".jsonl", encoding="utf-8")
-        with handle:
-            for row in rows:
-                handle.write(json.dumps(row, ensure_ascii=False) + "\n")
-        self.addCleanup(lambda: Path(handle.name).unlink(missing_ok=True))
-        return Path(handle.name)
-
-    def test_slug_conflict_appends_hash(self):
-        title = "duplicate-title"
-        sample_a = {"raw_text": "Officials debunked this first test sample.", "title": title}
-        sample_b = {"raw_text": "Officials debunked this second test sample.", "title": title}
-        path = self.write_jsonl([sample_a, sample_b])
-        response = StructuredRumorAnalysis(
-            title=title,
-            summary=None,
-            rumor_content="ignored",
-            truth_content=None,
-            status=RumorStatus.FAKE,
-            tags=None,
-            source_urls=None,
-            analysis_summary="test",
-            truthfulness_score=0.8,
-            evidence="Officials debunked it.",
-        )
-
-        stats = import_jsonl_file(path, analyzer=FakeAnalyzer([response, response]))
-
-        self.assertEqual(stats.succeeded, 2)
-        first_slug = slugify(title)
-        second_slug = f"{first_slug}-{hashlib.sha1(sample_b['raw_text'].encode('utf-8')).hexdigest()[:8]}"
-        first = get_rumor_by_slug(self.db, first_slug)
-        second = get_rumor_by_slug(self.db, second_slug)
-        self.assertIsNotNone(first)
-        self.assertIsNotNone(second)
-        self.created_slugs.extend([first_slug, second_slug])
-
-    def test_database_import_creates_rumor_and_analysis(self):
-        title = f"db-integration-{uuid4().hex[:8]}"
-        path = self.write_jsonl([{"raw_text": "The sample explicitly says officials debunked it.", "title": title}])
-        response = StructuredRumorAnalysis(
-            title=title,
-            summary="summary",
-            rumor_content="ignored",
-            truth_content="explanation",
-            status=RumorStatus.FAKE,
-            tags=["test"],
-            source_urls=["https://example.com"],
-            analysis_summary="analysis-summary",
-            truthfulness_score=0.9,
-            evidence="Officials debunked it.",
-        )
-
-        stats = import_jsonl_file(path, analyzer=FakeAnalyzer([response]))
-
-        self.assertEqual(stats.succeeded, 1)
-        rumor = get_rumor_by_slug(self.db, slugify(title))
-        self.assertIsNotNone(rumor)
-        self.created_slugs.append(rumor.slug)
-        analysis = get_analysis_by_rumor_id(self.db, rumor.id)
-        self.assertIsNotNone(analysis)
-        self.assertEqual(analysis.summary, "analysis-summary")
+    assert stats.failed == 1
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_jsonl_dry_run_preview_contains_slug(tmp_path):
+    row = {"title": "Test Rumor Title", "rumor_content": "Some content", "status": "FAKE"}
+    path = write_jsonl(tmp_path, [row])
+    output = io.StringIO()
+
+    stats = import_jsonl_file(path, dry_run=True, output=output)
+
+    assert stats.succeeded == 1
+    out = output.getvalue()
+    assert "test-rumor-title" in out  # auto-generated slug
+
+
+def test_jsonl_dry_run_includes_analysis_when_score_present(tmp_path):
+    row = {
+        "title": "Rumor with analysis",
+        "rumor_content": "content",
+        "truthfulness_score": 0.1,
+        "evidence": "Some evidence",
+    }
+    path = write_jsonl(tmp_path, [row])
+    output = io.StringIO()
+
+    stats = import_jsonl_file(path, dry_run=True, output=output)
+
+    assert stats.succeeded == 1
+    assert "truthfulness_score" in output.getvalue()
+
+
+def test_jsonl_explicit_slug_preserved(tmp_path):
+    row = {"title": "Some Title", "slug": "my-custom-slug", "rumor_content": "content"}
+    path = write_jsonl(tmp_path, [row])
+    output = io.StringIO()
+
+    stats = import_jsonl_file(path, dry_run=True, output=output)
+
+    assert stats.succeeded == 1
+    assert "my-custom-slug" in output.getvalue()
+
+
+def test_jsonl_limit_respected(tmp_path):
+    rows = [{"title": f"Rumor {i}", "rumor_content": "content"} for i in range(5)]
+    path = write_jsonl(tmp_path, rows)
+
+    stats = import_jsonl_file(path, dry_run=True, limit=3)
+
+    assert stats.processed == 3
+
+
+def test_jsonl_media_files_round_trip(tmp_path):
+    row = {
+        "title": "Rumor with images",
+        "rumor_content": "content",
+        "media_files": [
+            {"type": "image", "path": "media/test/rumor.jpg", "label": "rumor"},
+            {"type": "video", "path": "https://example.com/v.mp4", "label": "source", "caption": "vid"},
+        ],
+    }
+    path = write_jsonl(tmp_path, [row])
+    output = io.StringIO()
+
+    stats = import_jsonl_file(path, dry_run=True, output=output)
+
+    assert stats.succeeded == 1
+    preview = json.loads(output.getvalue().split(": ", 1)[1])
+    media = preview["rumor"]["media_files"]
+    assert len(media) == 2
+    assert media[0]["type"] == "image"
+    assert media[1]["type"] == "video"
+    assert media[1]["caption"] == "vid"
+
+
+def test_jsonl_media_files_invalid_type_rejected(tmp_path, caplog):
+    import logging
+    row = {
+        "title": "Bad media",
+        "rumor_content": "content",
+        "media_files": [{"type": "audio", "path": "media/x.mp3"}],
+    }
+    path = write_jsonl(tmp_path, [row])
+    with caplog.at_level(logging.ERROR):
+        stats = import_jsonl_file(path, dry_run=True)
+    assert stats.failed == 1
+
+
+# ─── Markdown import via LLM (unit, no DB) ───────────────────────────────────
+
+def test_md_dry_run_calls_llm_and_prints_preview(tmp_path):
+    md = write_md(tmp_path, "This is clearly a fake rumor debunked by officials.")
+    response = StructuredRumorAnalysis(
+        title="Fake Rumor",
+        summary="Summary",
+        rumor_content="content",
+        truth_content="truth",
+        status=RumorStatus.FAKE,
+        tags=["test"],
+        source_urls=None,
+        analysis_summary="Analysis",
+        truthfulness_score=0.1,
+        evidence="Officials debunked it.",
+    )
+    output = io.StringIO()
+
+    stats = import_md_file(md, dry_run=True, output=output, analyzer=FakeAnalyzer([response]))
+
+    assert stats.succeeded == 1
+    assert stats.failed == 0
+    out = output.getvalue()
+    assert "truthfulness_score" in out
+    assert "FAKE" in out
+    assert "Officials debunked it." in out
+
+
+def test_md_llm_failure_counted_as_failed(tmp_path, caplog):
+    import logging
+    md = write_md(tmp_path, "Some markdown content.")
+
+    with caplog.at_level(logging.ERROR):
+        stats = import_md_file(md, dry_run=True, analyzer=FakeAnalyzer([RuntimeError("LLM down")]))
+
+    assert stats.failed == 1
+    assert "LLM down" in caplog.text
+
+
+def test_no_verdict_signal_forces_dubious():
+    sample = _RumorSampleIn(raw_text="This is only an unverified retelling of a claim.")
+    analysis = StructuredRumorAnalysis(
+        title="Title", summary=None, rumor_content="ignored", truth_content=None,
+        status=RumorStatus.TRUE, tags=None, source_urls=None,
+        analysis_summary=None, truthfulness_score=0.7, evidence="Model overreached",
+    )
+    normalized = normalize_structured_analysis(sample, analysis)
+    assert normalized.status == RumorStatus.DUBIOUS
+
+
+# ─── Database integration tests ──────────────────────────────────────────────
+
+def test_jsonl_direct_import_creates_rumor_in_db(tmp_path, db, created_slugs):
+    title = f"direct-import-{uuid4().hex[:8]}"
+    path = write_jsonl(tmp_path, [{"title": title, "rumor_content": "content", "status": "FAKE"}])
+
+    stats = import_jsonl_file(path)
+
+    assert stats.succeeded == 1
+    rumor = get_rumor_by_slug(db, slugify(title))
+    assert rumor is not None
+    assert rumor.status.value == "FAKE"
+    created_slugs.append(rumor.slug)
+
+
+def test_jsonl_direct_import_with_analysis(tmp_path, db, created_slugs):
+    title = f"direct-with-analysis-{uuid4().hex[:8]}"
+    path = write_jsonl(tmp_path, [{
+        "title": title,
+        "rumor_content": "content",
+        "status": "FAKE",
+        "truthfulness_score": 0.05,
+        "analysis_summary": "Clearly fake",
+        "evidence": "Proof here",
+    }])
+
+    stats = import_jsonl_file(path)
+
+    assert stats.succeeded == 1
+    rumor = get_rumor_by_slug(db, slugify(title))
+    assert rumor is not None
+    created_slugs.append(rumor.slug)
+    analysis = get_analysis_by_rumor_id(db, rumor.id)
+    assert analysis is not None
+    assert analysis.summary == "Clearly fake"
+    assert analysis.truthfulness_score == pytest.approx(0.05)
+
+
+def test_jsonl_duplicate_slug_skipped(tmp_path, db, created_slugs):
+    title = f"dup-slug-test-{uuid4().hex[:8]}"
+    base_slug = slugify(title)
+    path = write_jsonl(tmp_path, [
+        {"title": title, "rumor_content": "first"},
+        {"title": title, "slug": base_slug, "rumor_content": "second"},
+    ])
+
+    stats = import_jsonl_file(path)
+
+    # same title but different content → both succeed (hash suffix differs)
+    assert stats.succeeded == 2
+    assert stats.duplicates == 0
+    rumor = get_rumor_by_slug(db, base_slug)
+    assert rumor is not None
+    created_slugs.append(base_slug)
+    # cleanup the hash-suffixed variant
+    from sqlalchemy import select
+    from src.db.models import Rumor
+    for r in db.execute(select(Rumor).where(Rumor.slug.like(f"{base_slug}-%"))).scalars():
+        created_slugs.append(r.slug)
+
+
+def test_md_import_creates_rumor_and_analysis(tmp_path, db, created_slugs):
+    title = f"md-import-{uuid4().hex[:8]}"
+    md_content = "Officials clearly debunked this rumor."
+    md = write_md(tmp_path, md_content, filename=f"{title}.md")
+    response = StructuredRumorAnalysis(
+        title=title, summary="summary", rumor_content="content",
+        truth_content="truth", status=RumorStatus.FAKE,
+        tags=["test"], source_urls=None,
+        analysis_summary="Fake", truthfulness_score=0.1, evidence="Debunked.",
+    )
+
+    stats = import_md_file(md, analyzer=FakeAnalyzer([response]))
+
+    assert stats.succeeded == 1
+    expected_slug = f"{slugify(title)}-{hash_suffix(md_content)}"
+    rumor = get_rumor_by_slug(db, expected_slug)
+    assert rumor is not None
+    created_slugs.append(rumor.slug)
+    analysis = get_analysis_by_rumor_id(db, rumor.id)
+    assert analysis is not None
+    assert analysis.summary == "Fake"

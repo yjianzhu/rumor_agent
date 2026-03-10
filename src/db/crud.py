@@ -1,9 +1,12 @@
 from uuid import UUID
-from sqlalchemy import select, func
-from sqlalchemy.orm import Session
+from datetime import datetime, timedelta, timezone
+
+from sqlalchemy import select, func, or_
+from sqlalchemy.orm import Session, joinedload
 
 from src.db.models import Rumor, AnalysisResult, RumorStatus
 from src.db.schemas import RumorCreate, RumorUpdate, AnalysisResultCreate
+from src.config import settings
 
 
 # ─── Rumor CRUD ───
@@ -16,7 +19,7 @@ def create_rumor(db: Session, data: RumorCreate) -> Rumor:
 
     rumor = Rumor(**data.model_dump(exclude_none=True))
     db.add(rumor)
-    db.commit()
+    db.flush()
     db.refresh(rumor)
     return rumor
 
@@ -34,11 +37,12 @@ def list_rumors(
     *,
     status: RumorStatus | None = None,
     tag: str | None = None,
+    q: str | None = None,
     is_published: bool | None = None,
     offset: int = 0,
     limit: int = 20,
 ) -> list[Rumor]:
-    """List rumors with optional filtering and pagination."""
+    """List rumors with optional filtering, search, and pagination."""
     stmt = select(Rumor)
 
     if status is not None:
@@ -47,6 +51,13 @@ def list_rumors(
         stmt = stmt.where(Rumor.tags.any(tag))
     if is_published is not None:
         stmt = stmt.where(Rumor.is_published == is_published)
+    if q:
+        pattern = f"%{q}%"
+        stmt = stmt.where(or_(
+            Rumor.title.ilike(pattern),
+            Rumor.summary.ilike(pattern),
+            Rumor.rumor_content.ilike(pattern),
+        ))
 
     stmt = stmt.order_by(Rumor.created_at.desc()).offset(offset).limit(limit)
     return list(db.execute(stmt).scalars().all())
@@ -54,6 +65,32 @@ def list_rumors(
 
 def count_rumors(db: Session) -> int:
     return db.execute(select(func.count(Rumor.id))).scalar_one()
+
+
+def count_rumors_filtered(
+    db: Session,
+    *,
+    status: RumorStatus | None = None,
+    tag: str | None = None,
+    q: str | None = None,
+    is_published: bool | None = None,
+) -> int:
+    """Count rumors with the same filter logic as list_rumors."""
+    stmt = select(func.count(Rumor.id))
+    if status is not None:
+        stmt = stmt.where(Rumor.status == status)
+    if tag is not None:
+        stmt = stmt.where(Rumor.tags.any(tag))
+    if is_published is not None:
+        stmt = stmt.where(Rumor.is_published == is_published)
+    if q:
+        pattern = f"%{q}%"
+        stmt = stmt.where(or_(
+            Rumor.title.ilike(pattern),
+            Rumor.summary.ilike(pattern),
+            Rumor.rumor_content.ilike(pattern),
+        ))
+    return db.execute(stmt).scalar_one()
 
 
 def update_rumor(db: Session, rumor_id: UUID, data: RumorUpdate) -> Rumor | None:
@@ -65,7 +102,7 @@ def update_rumor(db: Session, rumor_id: UUID, data: RumorUpdate) -> Rumor | None
     for field, value in data.model_dump(exclude_unset=True).items():
         setattr(rumor, field, value)
 
-    db.commit()
+    db.flush()
     db.refresh(rumor)
     return rumor
 
@@ -76,7 +113,7 @@ def delete_rumor(db: Session, rumor_id: UUID) -> bool:
     if not rumor:
         return False
     db.delete(rumor)
-    db.commit()
+    db.flush()
     return True
 
 
@@ -92,7 +129,7 @@ def create_analysis_result(db: Session, data: AnalysisResultCreate) -> AnalysisR
 
     result = AnalysisResult(**data.model_dump())
     db.add(result)
-    db.commit()
+    db.flush()
     db.refresh(result)
     return result
 
@@ -101,3 +138,66 @@ def get_analysis_by_rumor_id(db: Session, rumor_id: UUID) -> AnalysisResult | No
     return db.execute(
         select(AnalysisResult).where(AnalysisResult.rumor_id == rumor_id)
     ).scalar_one_or_none()
+
+
+# ─── Detail / Stats / Tags ───
+
+def get_rumor_detail_by_slug(db: Session, slug: str) -> Rumor | None:
+    """Get a single rumor with its analysis eagerly loaded."""
+    stmt = (
+        select(Rumor)
+        .options(joinedload(Rumor.analysis))
+        .where(Rumor.slug == slug)
+    )
+    return db.execute(stmt).unique().scalar_one_or_none()
+
+
+def count_by_status(db: Session) -> dict[str, int]:
+    rows = db.execute(
+        select(Rumor.status, func.count(Rumor.id)).group_by(Rumor.status)
+    ).all()
+    return {row[0].value: row[1] for row in rows}
+
+
+def count_published(db: Session) -> int:
+    return db.execute(
+        select(func.count(Rumor.id)).where(Rumor.is_published.is_(True))
+    ).scalar_one()
+
+
+def count_recent(db: Session, days: int = 7) -> int:
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    return db.execute(
+        select(func.count(Rumor.id)).where(Rumor.created_at >= cutoff)
+    ).scalar_one()
+
+
+def list_tags(db: Session) -> list[str]:
+    """Return all distinct tags across all rumors."""
+    rows = db.execute(
+        select(func.unnest(Rumor.tags)).distinct()
+    ).scalars().all()
+    return sorted(t for t in rows if t)
+
+
+# ─── Semantic dedup ───
+
+def find_similar_rumor(
+    db: Session,
+    embedding: list[float],
+    threshold: float = settings.DEDUP_SIMILARITY_THRESHOLD,
+) -> Rumor | None:
+    distance = Rumor.embedding.cosine_distance(embedding)
+    stmt = (
+        select(Rumor)
+        .where(Rumor.embedding.isnot(None))
+        .order_by(distance)
+        .limit(1)
+    )
+    rumor = db.execute(stmt).scalar_one_or_none()
+    if rumor is None:
+        return None
+    cos_dist = db.execute(select(distance).where(Rumor.id == rumor.id)).scalar_one()
+    if 1 - cos_dist >= threshold:
+        return rumor
+    return None

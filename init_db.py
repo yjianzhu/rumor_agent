@@ -15,6 +15,7 @@ def init_db():
         # Enable uuid-ossp extension for uuid_generate_v4()
         with engine.connect() as connection:
             connection.execute(text('CREATE EXTENSION IF NOT EXISTS "uuid-ossp";'))
+            connection.execute(text('CREATE EXTENSION IF NOT EXISTS vector;'))
             connection.execute(text("""
                 DO $$
                 BEGIN

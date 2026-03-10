@@ -2,5 +2,12 @@ sqlalchemy
 psycopg2-binary
 python-dotenv
 pydantic
+pydantic-settings
 google-adk
 litellm
+tenacity
+pgvector
+fastapi
+uvicorn[standard]
+jinja2
+pytest

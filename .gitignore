@@ -11,6 +11,7 @@ __pycache__/
 .ruff_cache/
 .coverage
 .coverage.*
+.claude/
 htmlcov/
 
 .venv/
@@ -27,6 +28,8 @@ dist/
 
 logs/
 *.log
+
+media/
 
 .DS_Store
 Thumbs.db

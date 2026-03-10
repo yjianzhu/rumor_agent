@@ -1,53 +1,35 @@
 import re
 from hashlib import sha1
+from pathlib import Path
 from typing import Protocol
 
 from src.db.models import RumorStatus
-from src.db.schemas import RumorCreate, RumorSampleIn, StructuredRumorAnalysis
+from src.db.schemas import RumorCreate, _RumorSampleIn, StructuredRumorAnalysis
 from src.llm.client import AdkLlmClient
 
 
 class StructuredAnalyzer(Protocol):
-    def analyze(self, sample: RumorSampleIn) -> StructuredRumorAnalysis: ...
+    def analyze(self, sample: _RumorSampleIn) -> StructuredRumorAnalysis: ...
 
 
 VERDICT_SIGNALS: dict[RumorStatus, tuple[str, ...]] = {
     RumorStatus.FAKE: (
-        "\u8c23\u8a00",
-        "\u5047\u6d88\u606f",
-        "\u4e0d\u5b9e",
-        "\u8f9f\u8c23",
-        "\u7cfb\u8c23\u8a00",
-        "\u865a\u5047",
-        "false",
-        "fake",
-        "hoax",
-        "debunked",
-        "misleading",
+        "谣言", "假消息", "不实", "辟谣", "系谣言", "虚假",
+        "false", "fake", "hoax", "debunked", "misleading",
     ),
     RumorStatus.TRUE: (
-        "\u5c5e\u5b9e",
-        "\u771f\u5b9e",
-        "\u8bc1\u5b9e",
-        "\u786e\u8ba4",
-        "\u662f\u771f\u7684",
-        "confirmed",
-        "verified",
-        "true",
+        "属实", "真实", "证实", "确认", "是真的",
+        "confirmed", "verified", "true",
     ),
     RumorStatus.OUTDATED: (
-        "\u8fc7\u65f6",
-        "\u5df2\u8fc7\u65f6",
-        "\u65e7\u95fb",
-        "\u65e7\u6d88\u606f",
-        "outdated",
-        "old rumor",
+        "过时", "已过时", "旧闻", "旧消息",
+        "outdated", "old rumor",
     ),
 }
 
 
 def analyze_sample(
-    sample: RumorSampleIn,
+    sample: _RumorSampleIn,
     *,
     model: str | None = None,
     client: StructuredAnalyzer | None = None,
@@ -57,7 +39,29 @@ def analyze_sample(
     return normalize_structured_analysis(sample, result)
 
 
-def build_preview_analysis(sample: RumorSampleIn) -> StructuredRumorAnalysis:
+def analyze_markdown(
+    path: Path,
+    *,
+    title: str | None = None,
+    tags: list[str] | None = None,
+    source_urls: list[str] | None = None,
+    is_published: bool = False,
+    model: str | None = None,
+    client: StructuredAnalyzer | None = None,
+) -> StructuredRumorAnalysis:
+    """Read a Markdown file and analyze its content via LLM."""
+    raw_text = path.read_text(encoding="utf-8").strip()
+    sample = _RumorSampleIn(
+        raw_text=raw_text,
+        title=title or path.stem,
+        tags=tags,
+        source_urls=source_urls,
+        is_published=is_published,
+    )
+    return analyze_sample(sample, model=model, client=client)
+
+
+def build_preview_analysis(sample: _RumorSampleIn) -> StructuredRumorAnalysis:
     return normalize_structured_analysis(
         sample,
         StructuredRumorAnalysis(
@@ -90,7 +94,7 @@ def to_rumor_create(data: StructuredRumorAnalysis, *, slug: str, is_published: b
 
 
 def normalize_structured_analysis(
-    sample: RumorSampleIn,
+    sample: _RumorSampleIn,
     analysis: StructuredRumorAnalysis,
 ) -> StructuredRumorAnalysis:
     status = analysis.status
@@ -98,7 +102,7 @@ def normalize_structured_analysis(
         status = RumorStatus.DUBIOUS
 
     return StructuredRumorAnalysis(
-        title=clean_text(sample.title) or clean_text(analysis.title) or derive_title(sample.raw_text),
+        title=clean_text(analysis.title) or clean_text(sample.title) or derive_title(sample.raw_text),
         summary=clean_text(analysis.summary),
         rumor_content=sample.raw_text.strip(),
         truth_content=clean_text(analysis.truth_content),

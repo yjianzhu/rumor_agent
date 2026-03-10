@@ -1,89 +1,108 @@
-# Rumor Agent - Project Design & Plan
+# Rumor Agent
 
-## 1. Project Overview
-**Rumor Agent** is an intelligent system designed to detect, track, analyze, and verify network rumors. It leverages LLMs (Large Language Models) to assess the truthfulness of claims, aggregate evidence, and provide automated debunks or verifications.
+网络谣言检测、追踪与分析系统。利用 LLM 评估谣言真实性，聚合证据，提供自动化辟谣。
 
-## 2. Architecture Design
-The system consists of the following core components:
+## 架构
 
-*   **Ingestion Layer**: Collects rumors from various sources (social media, news, user submissions).
-*   **Data Layer**: PostgreSQL database storing rumor content, media references, and analysis results (using SQLAlchemy).
-*   **Analysis Core**: AI Agent responsible for:
-    *   Claim extraction.
-    *   Fact-checking against trusted sources.
-    *   Sentiment and classification analysis.
-*   **API / Interface**: Interfaces for users to query rumors or view analysis results.
+| 层 | 说明 |
+|---|------|
+| **Ingestion** | JSONL 直接导入 / Markdown + LLM 分析导入 |
+| **Data** | PostgreSQL + SQLAlchemy ORM，JSONB 存储 tags / media / urls |
+| **Analysis** | LiteLLM 调用 LLM 做结构化谣言分析 |
+| **Media** | 本地图片存储（`media/<slug>/`），视频以 URL 形式记录 |
 
-## 3. Data Model (Current Status)
-The database schema is built using SQLAlchemy ORM.
+## 数据模型
 
-### Tables
-1.  **`rumors`**
-    *   **Core**: `id` (UUID), `title`, `slug`.
-    *   **Content**: `summary`, `rumor_content`, `truth_content`.
-    *   **Status**: `Enum` (FAKE, TRUE, DUBIOUS, OUTDATED).
-    *   **Metadata**: `tags`, `view_count`, `is_published`, `created_at`.
-    *   **Sources**: `media_files` (JSON), `source_urls` (JSON).
+### rumors
+`id` (UUID), `title`, `slug`, `summary`, `rumor_content`, `truth_content`,
+`status` (FAKE / TRUE / DUBIOUS / OUTDATED), `tags`, `media_files` (JSONB → `MediaItem[]`),
+`source_urls`, `view_count`, `is_published`, `created_at`, `updated_at`
 
-2.  **`analysis_results`**
-    *   **Relation**: Linked to `rumors` (One-to-One).
-    *   **Analysis**: `truthfulness_score` (0.0-1.0), `evidence` (text), `summary`.
-    *   **Meta**: `model_name` used for analysis.
+### analysis_results
+`id`, `rumor_id` (FK → rumors), `truthfulness_score` (0.0–1.0),
+`summary`, `evidence`, `model_name`, `created_at`
 
-## 4. Roadmap & Implementation Plan
+### MediaItem 结构
+```json
+{"type": "image|video", "path": "media/<slug>/xxx.jpg 或 URL", "label": "rumor|debunk|source", "caption": ""}
+```
 
-### Phase 1: Foundation (Current)
-- [x] Set up Python environment.
-- [x] Define database models (Rumor, AnalysisResult).
-- [x] Create database initialization script (`init_db.py`).
-- [x] Implement basic CRUD operations for Rumors.
-
-### Phase 2: Core Analysis Logic
-- [ ] Integrate LLM client (e.g., OpenAI/Gemini).
-- [ ] Implement `Analyzer` module to take a rumor and output an `AnalysisResult`.
-- [ ] Develop evidence gathering module (Web Search integration).
-
-### Phase 3: Ingestion & Pipeline
-- [ ] Create scrapers or API connectors for source input.
-- [ ] Build a task queue (if needed) for processing rumors asynchronously.
-
-### Phase 4: API & Frontend
-- [ ] Build a REST/GraphQL API (FastAPI recommended).
-- [ ] Develop a user-facing dashboard to view rumors and analysis.
-
-## 5. Setup & Usage
-
-### Prerequisites
-*   Python 3.10+
-*   PostgreSQL with `uuid-ossp` extension enabled.
-
-### Installation
-1.  **Install Dependencies**:
-    ```bash
-    pip install -r requirements.txt
-    ```
-
-2.  **Environment Setup**:
-    Configure your `.env` file with `DATABASE_URL` and model API keys.
-    *(See `src/config.py`)*
-
-3.  **Initialize Database**:
-    ```bash
-    python init_db.py
-    ```
-    This script will enable necessary extensions and create all tables defined in `src/db/models.py`.
-
-## 6. Directory Structure
+## 目录结构
 ```
 rumor_agent/
-├── init_db.py          # Database initialization script
-├── requirements.txt    # Project dependencies
-└── src/
-    ├── config.py       # Configuration management
-    ├── main.py         # Entry point (TBD)
-    └── db/
-        ├── base.py     # SQLAlchemy Base and Engine
-        ├── models.py   # Database models
-        ├── schemas.py  # Pydantic validation schemas
-        └── crud.py     # CRUD operations
+├── pyproject.toml        # 项目配置 & pytest 设置
+├── requirements.txt
+├── init_db.py            # 数据库建表
+├── src/
+│   ├── config.py         # 配置（DB / LLM / MEDIA_DIR）
+│   ├── main.py           # CLI 入口（--import-jsonl / --import-md）
+│   ├── media.py          # 图片存储工具
+│   ├── logger.py         # 日志配置
+│   ├── analyzer/
+│   │   └── analyzer.py   # LLM 分析逻辑
+│   ├── llm/
+│   │   └── client.py     # LiteLLM 封装
+│   └── db/
+│       ├── base.py       # SQLAlchemy Engine & Session
+│       ├── models.py     # ORM models
+│       ├── schemas.py    # Pydantic schemas（含 MediaItem）
+│       └── crud.py       # CRUD 操作
+├── tests/
+│   ├── conftest.py       # 共享 fixtures & helpers
+│   ├── test_import_pipeline.py
+│   └── test_media.py
+├── scripts/
+│   ├── make_jsonl.py
+│   └── verify_import.py
+└── examples/
 ```
+
+## 使用
+
+### 前置条件
+- Python 3.11+
+- PostgreSQL（启用 `uuid-ossp` 扩展）
+
+### 安装
+```bash
+pip install -r requirements.txt
+```
+
+### 初始化数据库
+```bash
+python init_db.py
+```
+
+### 导入数据
+```bash
+# JSONL 直接导入（不需要 LLM）
+python -m src.main --import-jsonl data.jsonl
+python -m src.main --import-jsonl data.jsonl --dry-run   # 预览
+python -m src.main --import-jsonl data.jsonl --limit 10  # 限制条数
+
+# Markdown 通过 LLM 分析导入
+python -m src.main --import-md rumor.md
+python -m src.main --import-md rumor.md --model openai/gpt-4o
+```
+
+### 运行测试
+```bash
+python -m pytest                    # 全量（需要 DB）
+python -m pytest -k "not db"        # 仅单元测试
+```
+
+## 配置
+
+通过 `.env` 文件或环境变量：
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `DB_USER` | `postgres` | 数据库用户 |
+| `DB_PASSWORD` | `password` | 数据库密码 |
+| `DB_HOST` | `localhost` | 数据库地址 |
+| `DB_PORT` | `5432` | 数据库端口 |
+| `DB_NAME` | `rumor_agent` | 数据库名 |
+| `LLM_API_KEY` | — | LLM API 密钥 |
+| `LLM_API_BASE` | — | LLM API 地址 |
+| `LLM_MODEL` | `openai/gpt-4o-mini` | 默认模型 |
+| `MEDIA_DIR` | `media` | 媒体文件存储目录 |

@@ -1,8 +1,9 @@
 import enum
 from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Boolean, Float, Enum
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, deferred
 from sqlalchemy.sql import func, text
 from sqlalchemy.dialects.postgresql import UUID, JSONB, ARRAY
+from pgvector.sqlalchemy import Vector
 from src.db.base import Base
 
 class RumorStatus(str, enum.Enum):
@@ -31,6 +32,9 @@ class Rumor(Base):
     # 4. Media & Sources (JSONB)
     media_files = Column(JSONB, server_default=text("'[]'::jsonb"))
     source_urls = Column(JSONB, server_default=text("'[]'::jsonb"))
+
+    # 4b. Embedding for semantic dedup (deferred: not loaded in normal queries)
+    embedding = deferred(Column(Vector(1536), nullable=True))
 
     # 5. Stats & Meta
     view_count = Column(Integer, default=0)
