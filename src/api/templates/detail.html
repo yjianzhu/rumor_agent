@@ -3,29 +3,32 @@
 {% block title %}{{ rumor.title }} — Rumor Agent{% endblock %}
 
 {% block content %}
-<a href="/" class="inline-flex items-center text-sm text-gray-500 hover:text-gray-700 mb-6">
-  &larr; 返回列表
+<a href="/" class="inline-flex items-center gap-1 text-sm text-slate-400 hover:text-slate-600 transition-colors duration-150 mb-6">
+  <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+    <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
+  </svg>
+  返回列表
 </a>
 
-<article class="bg-white rounded-lg border border-gray-200 p-6 space-y-6">
+<article class="bg-white rounded-2xl border border-slate-200/60 p-8 shadow-sm space-y-6">
   <!-- Header -->
   <div>
     <div class="flex items-center gap-3 mb-2">
       {% set status_colors = {
-        'FAKE': 'bg-red-500',
-        'TRUE': 'bg-green-500',
-        'DUBIOUS': 'bg-yellow-500',
-        'OUTDATED': 'bg-gray-400'
+        'FAKE': 'bg-rose-50 text-rose-600',
+        'TRUE': 'bg-emerald-50 text-emerald-600',
+        'DUBIOUS': 'bg-amber-50 text-amber-600',
+        'OUTDATED': 'bg-slate-100 text-slate-500'
       } %}
-      <span class="px-2 py-0.5 rounded text-xs font-medium text-white {{ status_colors.get(rumor.status.value, 'bg-gray-400') }}">
+      <span class="px-2.5 py-0.5 rounded-full text-xs font-medium {{ status_colors.get(rumor.status.value, 'bg-slate-100 text-slate-500') }}">
         {{ rumor.status.value }}
       </span>
       {% if rumor.is_published %}
-      <span class="text-xs text-green-600 font-medium">已发布</span>
+      <span class="text-xs text-emerald-600 font-medium">已发布</span>
       {% endif %}
     </div>
-    <h1 class="text-2xl font-bold text-gray-900">{{ rumor.title }}</h1>
-    <p class="text-sm text-gray-400 mt-1">
+    <h1 class="text-2xl font-semibold tracking-tight text-slate-800">{{ rumor.title }}</h1>
+    <p class="text-sm text-slate-400 mt-1">
       {{ rumor.created_at.strftime('%Y-%m-%d %H:%M') }}
       · 浏览 {{ rumor.view_count }} 次
       {% if rumor.updated_at and rumor.updated_at != rumor.created_at %}
@@ -37,35 +40,35 @@
   <!-- Summary -->
   {% if rumor.summary %}
   <div>
-    <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-1">摘要</h2>
-    <p class="text-gray-700 leading-relaxed">{{ rumor.summary }}</p>
+    <h2 class="text-xs font-medium uppercase tracking-widest text-slate-400 mb-1">摘要</h2>
+    <p class="text-slate-700 leading-relaxed">{{ rumor.summary }}</p>
   </div>
   {% endif %}
 
   <!-- Rumor content -->
   {% if rumor.rumor_content %}
-  <div class="bg-red-50 border-l-4 border-red-300 p-4 rounded-r">
-    <h2 class="text-sm font-semibold text-red-700 uppercase tracking-wide mb-2">谣言内容</h2>
-    <p class="text-gray-800 leading-relaxed whitespace-pre-wrap">{{ rumor.rumor_content }}</p>
+  <div class="bg-rose-50/60 border-l-4 border-rose-300 p-4 rounded-lg">
+    <h2 class="text-xs font-medium uppercase tracking-widest text-rose-600 mb-2">谣言内容</h2>
+    <p class="text-slate-800 leading-relaxed whitespace-pre-wrap">{{ rumor.rumor_content }}</p>
   </div>
   {% endif %}
 
   <!-- Truth content -->
   {% if rumor.truth_content %}
-  <div class="bg-green-50 border-l-4 border-green-300 p-4 rounded-r">
-    <h2 class="text-sm font-semibold text-green-700 uppercase tracking-wide mb-2">真相</h2>
-    <p class="text-gray-800 leading-relaxed whitespace-pre-wrap">{{ rumor.truth_content }}</p>
+  <div class="bg-emerald-50/60 border-l-4 border-emerald-300 p-4 rounded-lg">
+    <h2 class="text-xs font-medium uppercase tracking-widest text-emerald-600 mb-2">真相</h2>
+    <p class="text-slate-800 leading-relaxed whitespace-pre-wrap">{{ rumor.truth_content }}</p>
   </div>
   {% endif %}
 
   <!-- Source URLs -->
   {% if rumor.source_urls %}
   <div>
-    <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2">来源</h2>
+    <h2 class="text-xs font-medium uppercase tracking-widest text-slate-400 mb-2">来源</h2>
     <ul class="space-y-1">
       {% for url in rumor.source_urls %}
       <li>
-        <a href="{{ url }}" target="_blank" rel="noopener" class="text-sm text-indigo-600 hover:underline break-all">{{ url }}</a>
+        <a href="{{ url }}" target="_blank" rel="noopener" class="text-sm text-indigo-600 hover:text-indigo-500 underline underline-offset-2 transition-colors duration-150 break-all">{{ url }}</a>
       </li>
       {% endfor %}
     </ul>
@@ -76,7 +79,7 @@
   {% if rumor.tags %}
   <div class="flex flex-wrap gap-2">
     {% for t in rumor.tags %}
-    <span class="inline-block bg-gray-100 text-gray-600 text-xs px-2 py-1 rounded">#{{ t }}</span>
+    <span class="inline-block bg-slate-100/80 text-slate-500 text-xs px-2 py-1 rounded-md">#{{ t }}</span>
     {% endfor %}
   </div>
   {% endif %}

@@ -1,18 +1,24 @@
 {% set status_labels = {'FAKE': '虚假', 'TRUE': '真实', 'DUBIOUS': '存疑', 'OUTDATED': '过时'} %}
-{% set status_text_colors = {'FAKE': 'text-red-600', 'TRUE': 'text-green-600', 'DUBIOUS': 'text-yellow-600', 'OUTDATED': 'text-gray-500'} %}
+{% set status_text_colors = {'FAKE': 'text-rose-600', 'TRUE': 'text-emerald-600', 'DUBIOUS': 'text-amber-600', 'OUTDATED': 'text-slate-500'} %}
+{% set status_border_colors = {'FAKE': 'border-l-rose-300', 'TRUE': 'border-l-emerald-300', 'DUBIOUS': 'border-l-amber-300', 'OUTDATED': 'border-l-slate-300'} %}
 
-<div class="flex flex-wrap items-center gap-4 text-sm text-gray-600 mb-5 bg-white border border-gray-200 rounded-lg px-4 py-3">
-  <span>
-    共 <strong class="text-gray-900">{{ stats.total }}</strong> 条
-  </span>
-  <span class="text-gray-300">|</span>
+<div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
+  <div class="bg-white rounded-xl border border-slate-200/60 px-4 py-3">
+    <p class="text-xs text-slate-400 mb-1">总数</p>
+    <p class="text-lg font-semibold text-slate-800">{{ stats.total }}</p>
+  </div>
   {% for s, count in stats.by_status.items() %}
-  <span class="{{ status_text_colors.get(s, '') }}">
-    {{ status_labels.get(s, s) }} <strong>{{ count }}</strong>
-  </span>
+  <div class="bg-white rounded-xl border border-slate-200/60 border-l-2 {{ status_border_colors.get(s, 'border-l-slate-300') }} px-4 py-3">
+    <p class="text-xs text-slate-400 mb-1">{{ status_labels.get(s, s) }}</p>
+    <p class="text-lg font-semibold {{ status_text_colors.get(s, 'text-slate-800') }}">{{ count }}</p>
+  </div>
   {% endfor %}
-  <span class="text-gray-300">|</span>
-  <span>已发布 <strong>{{ stats.published }}</strong></span>
-  <span class="text-gray-300">|</span>
-  <span>近 7 天 <strong>{{ stats.recent_7d }}</strong></span>
+  <div class="bg-white rounded-xl border border-slate-200/60 px-4 py-3">
+    <p class="text-xs text-slate-400 mb-1">已发布</p>
+    <p class="text-lg font-semibold text-slate-800">{{ stats.published }}</p>
+  </div>
+  <div class="bg-white rounded-xl border border-slate-200/60 px-4 py-3">
+    <p class="text-xs text-slate-400 mb-1">近 7 天</p>
+    <p class="text-lg font-semibold text-slate-800">{{ stats.recent_7d }}</p>
+  </div>
 </div>

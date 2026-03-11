@@ -4,50 +4,58 @@
 
 {% block content %}
 <!-- Toolbar -->
-<div class="flex flex-wrap items-center gap-3 mb-5">
-  <input
-    type="search"
-    name="q"
-    placeholder="搜索标题 / 内容..."
-    value="{{ q or '' }}"
-    class="flex-1 min-w-[200px] rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
-    hx-get="/partials/rumors"
-    hx-trigger="input changed delay:300ms, search"
-    hx-target="#rumor-list"
-    hx-include="[name='status'],[name='tag']"
-    hx-indicator="#loading"
-  >
+<div class="bg-white rounded-xl border border-slate-200/60 shadow-sm p-4 mb-6">
+  <div class="flex flex-wrap items-center gap-3">
+    <input
+      type="search"
+      name="q"
+      placeholder="搜索标题 / 内容..."
+      value="{{ q or '' }}"
+      class="flex-1 min-w-[200px] rounded-lg bg-slate-50/50 border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-300 transition-all duration-150"
+      hx-get="/partials/rumors"
+      hx-trigger="input changed delay:300ms, search"
+      hx-target="#rumor-list"
+      hx-include="[name='status'],[name='tag']"
+      hx-indicator="#loading"
+    >
 
-  <select
-    name="status"
-    class="rounded-md border border-gray-300 px-3 py-2 text-sm bg-white"
-    hx-get="/partials/rumors"
-    hx-trigger="change"
-    hx-target="#rumor-list"
-    hx-include="[name='q'],[name='tag']"
-  >
-    <option value="">全部状态</option>
-    <option value="FAKE" {% if status == 'FAKE' %}selected{% endif %}>FAKE</option>
-    <option value="TRUE" {% if status == 'TRUE' %}selected{% endif %}>TRUE</option>
-    <option value="DUBIOUS" {% if status == 'DUBIOUS' %}selected{% endif %}>DUBIOUS</option>
-    <option value="OUTDATED" {% if status == 'OUTDATED' %}selected{% endif %}>OUTDATED</option>
-  </select>
+    <select
+      name="status"
+      class="rounded-lg bg-slate-50/50 border border-slate-200 px-3 py-2 text-sm appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-300 transition-all duration-150"
+      hx-get="/partials/rumors"
+      hx-trigger="change"
+      hx-target="#rumor-list"
+      hx-include="[name='q'],[name='tag']"
+    >
+      <option value="">全部状态</option>
+      <option value="FAKE" {% if status == 'FAKE' %}selected{% endif %}>FAKE</option>
+      <option value="TRUE" {% if status == 'TRUE' %}selected{% endif %}>TRUE</option>
+      <option value="DUBIOUS" {% if status == 'DUBIOUS' %}selected{% endif %}>DUBIOUS</option>
+      <option value="OUTDATED" {% if status == 'OUTDATED' %}selected{% endif %}>OUTDATED</option>
+    </select>
 
-  <select
-    name="tag"
-    class="rounded-md border border-gray-300 px-3 py-2 text-sm bg-white"
-    hx-get="/partials/rumors"
-    hx-trigger="change"
-    hx-target="#rumor-list"
-    hx-include="[name='q'],[name='status']"
-  >
-    <option value="">全部标签</option>
-    {% for t in tags %}
-    <option value="{{ t }}" {% if tag == t %}selected{% endif %}>{{ t }}</option>
-    {% endfor %}
-  </select>
+    <select
+      name="tag"
+      class="rounded-lg bg-slate-50/50 border border-slate-200 px-3 py-2 text-sm appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-300 transition-all duration-150"
+      hx-get="/partials/rumors"
+      hx-trigger="change"
+      hx-target="#rumor-list"
+      hx-include="[name='q'],[name='status']"
+    >
+      <option value="">全部标签</option>
+      {% for t in tags %}
+      <option value="{{ t }}" {% if tag == t %}selected{% endif %}>{{ t }}</option>
+      {% endfor %}
+    </select>
 
-  <span id="loading" class="htmx-indicator text-sm text-gray-400">加载中...</span>
+    <span id="loading" class="htmx-indicator text-sm text-slate-400 flex items-center gap-1.5">
+      <svg class="animate-spin h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+      </svg>
+      加载中...
+    </span>
+  </div>
 </div>
 
 <!-- Stats bar -->
