@@ -1,12 +1,41 @@
 from uuid import UUID
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select, func, or_
+from sqlalchemy import select, func, or_, Select
 from sqlalchemy.orm import Session, joinedload
 
 from src.db.models import Rumor, AnalysisResult, RumorStatus
 from src.db.schemas import RumorCreate, RumorUpdate, AnalysisResultCreate
 from src.config import settings
+
+
+def _escape_like(s: str) -> str:
+    """Escape LIKE wildcards so user input is treated literally."""
+    return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _apply_rumor_filters(
+    stmt: Select,
+    *,
+    status: RumorStatus | None = None,
+    tag: str | None = None,
+    q: str | None = None,
+    is_published: bool | None = None,
+) -> Select:
+    if status is not None:
+        stmt = stmt.where(Rumor.status == status)
+    if tag is not None:
+        stmt = stmt.where(Rumor.tags.any(tag))
+    if is_published is not None:
+        stmt = stmt.where(Rumor.is_published == is_published)
+    if q:
+        pattern = f"%{_escape_like(q)}%"
+        stmt = stmt.where(or_(
+            Rumor.title.ilike(pattern),
+            Rumor.summary.ilike(pattern),
+            Rumor.rumor_content.ilike(pattern),
+        ))
+    return stmt
 
 
 # ─── Rumor CRUD ───
@@ -32,6 +61,13 @@ def get_rumor_by_slug(db: Session, slug: str) -> Rumor | None:
     return db.execute(select(Rumor).where(Rumor.slug == slug)).scalar_one_or_none()
 
 
+def get_rumor_by_slug_hash(db: Session, content_hash: str) -> Rumor | None:
+    """Find a rumor whose slug ends with the given content hash suffix."""
+    return db.execute(
+        select(Rumor).where(Rumor.slug.like(f"%-{content_hash}"))
+    ).scalar_one_or_none()
+
+
 def list_rumors(
     db: Session,
     *,
@@ -43,22 +79,9 @@ def list_rumors(
     limit: int = 20,
 ) -> list[Rumor]:
     """List rumors with optional filtering, search, and pagination."""
-    stmt = select(Rumor)
-
-    if status is not None:
-        stmt = stmt.where(Rumor.status == status)
-    if tag is not None:
-        stmt = stmt.where(Rumor.tags.any(tag))
-    if is_published is not None:
-        stmt = stmt.where(Rumor.is_published == is_published)
-    if q:
-        pattern = f"%{q}%"
-        stmt = stmt.where(or_(
-            Rumor.title.ilike(pattern),
-            Rumor.summary.ilike(pattern),
-            Rumor.rumor_content.ilike(pattern),
-        ))
-
+    stmt = _apply_rumor_filters(
+        select(Rumor), status=status, tag=tag, q=q, is_published=is_published,
+    )
     stmt = stmt.order_by(Rumor.created_at.desc()).offset(offset).limit(limit)
     return list(db.execute(stmt).scalars().all())
 
@@ -76,20 +99,9 @@ def count_rumors_filtered(
     is_published: bool | None = None,
 ) -> int:
     """Count rumors with the same filter logic as list_rumors."""
-    stmt = select(func.count(Rumor.id))
-    if status is not None:
-        stmt = stmt.where(Rumor.status == status)
-    if tag is not None:
-        stmt = stmt.where(Rumor.tags.any(tag))
-    if is_published is not None:
-        stmt = stmt.where(Rumor.is_published == is_published)
-    if q:
-        pattern = f"%{q}%"
-        stmt = stmt.where(or_(
-            Rumor.title.ilike(pattern),
-            Rumor.summary.ilike(pattern),
-            Rumor.rumor_content.ilike(pattern),
-        ))
+    stmt = _apply_rumor_filters(
+        select(func.count(Rumor.id)), status=status, tag=tag, q=q, is_published=is_published,
+    )
     return db.execute(stmt).scalar_one()
 
 
@@ -108,7 +120,7 @@ def update_rumor(db: Session, rumor_id: UUID, data: RumorUpdate) -> Rumor | None
 
 
 def delete_rumor(db: Session, rumor_id: UUID) -> bool:
-    """Delete a rumor by ID. Returns True if deleted, False if not found."""
+    """Delete a rumor by ID. Cascade deletes associated analysis. Returns True if deleted."""
     rumor = db.get(Rumor, rumor_id)
     if not rumor:
         return False
@@ -132,6 +144,56 @@ def create_analysis_result(db: Session, data: AnalysisResultCreate) -> AnalysisR
     db.flush()
     db.refresh(result)
     return result
+
+
+def update_analysis_result(db: Session, rumor_id: UUID, data: AnalysisResultCreate) -> AnalysisResult | None:
+    """Update an existing analysis result. Returns None if not found."""
+    result = db.execute(
+        select(AnalysisResult).where(AnalysisResult.rumor_id == rumor_id)
+    ).scalar_one_or_none()
+    if not result:
+        return None
+
+    for field, value in data.model_dump(exclude={"rumor_id"}).items():
+        if value is not None:
+            setattr(result, field, value)
+
+    db.flush()
+    db.refresh(result)
+    return result
+
+
+def upsert_analysis_result(db: Session, data: AnalysisResultCreate) -> AnalysisResult:
+    """Create or update an analysis result for the given rumor."""
+    existing = db.execute(
+        select(AnalysisResult).where(AnalysisResult.rumor_id == data.rumor_id)
+    ).scalar_one_or_none()
+
+    if existing:
+        for field, value in data.model_dump(exclude={"rumor_id"}).items():
+            if value is not None:
+                setattr(existing, field, value)
+        db.flush()
+        db.refresh(existing)
+        return existing
+
+    result = AnalysisResult(**data.model_dump())
+    db.add(result)
+    db.flush()
+    db.refresh(result)
+    return result
+
+
+def delete_analysis_result(db: Session, rumor_id: UUID) -> bool:
+    """Delete analysis result for a rumor. Returns True if deleted."""
+    result = db.execute(
+        select(AnalysisResult).where(AnalysisResult.rumor_id == rumor_id)
+    ).scalar_one_or_none()
+    if not result:
+        return False
+    db.delete(result)
+    db.flush()
+    return True
 
 
 def get_analysis_by_rumor_id(db: Session, rumor_id: UUID) -> AnalysisResult | None:
@@ -189,15 +251,15 @@ def find_similar_rumor(
 ) -> Rumor | None:
     distance = Rumor.embedding.cosine_distance(embedding)
     stmt = (
-        select(Rumor)
+        select(Rumor, distance.label("cos_dist"))
         .where(Rumor.embedding.isnot(None))
         .order_by(distance)
         .limit(1)
     )
-    rumor = db.execute(stmt).scalar_one_or_none()
-    if rumor is None:
+    row = db.execute(stmt).first()
+    if row is None:
         return None
-    cos_dist = db.execute(select(distance).where(Rumor.id == rumor.id)).scalar_one()
+    rumor, cos_dist = row._tuple()
     if 1 - cos_dist >= threshold:
         return rumor
     return None

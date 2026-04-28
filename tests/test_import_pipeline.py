@@ -175,7 +175,7 @@ def test_no_verdict_signal_forces_dubious():
 
 # ─── Database integration tests ──────────────────────────────────────────────
 
-def test_jsonl_direct_import_creates_rumor_in_db(tmp_path, db, created_slugs):
+def test_jsonl_direct_import_creates_rumor_in_db(tmp_path, db):
     title = f"direct-import-{uuid4().hex[:8]}"
     path = write_jsonl(tmp_path, [{"title": title, "rumor_content": "content", "status": "FAKE"}])
 
@@ -185,10 +185,9 @@ def test_jsonl_direct_import_creates_rumor_in_db(tmp_path, db, created_slugs):
     rumor = get_rumor_by_slug(db, slugify(title))
     assert rumor is not None
     assert rumor.status.value == "FAKE"
-    created_slugs.append(rumor.slug)
 
 
-def test_jsonl_direct_import_with_analysis(tmp_path, db, created_slugs):
+def test_jsonl_direct_import_with_analysis(tmp_path, db):
     title = f"direct-with-analysis-{uuid4().hex[:8]}"
     path = write_jsonl(tmp_path, [{
         "title": title,
@@ -204,14 +203,13 @@ def test_jsonl_direct_import_with_analysis(tmp_path, db, created_slugs):
     assert stats.succeeded == 1
     rumor = get_rumor_by_slug(db, slugify(title))
     assert rumor is not None
-    created_slugs.append(rumor.slug)
     analysis = get_analysis_by_rumor_id(db, rumor.id)
     assert analysis is not None
     assert analysis.summary == "Clearly fake"
     assert analysis.truthfulness_score == pytest.approx(0.05)
 
 
-def test_jsonl_duplicate_slug_skipped(tmp_path, db, created_slugs):
+def test_jsonl_duplicate_slug_skipped(tmp_path, db):
     title = f"dup-slug-test-{uuid4().hex[:8]}"
     base_slug = slugify(title)
     path = write_jsonl(tmp_path, [
@@ -226,15 +224,9 @@ def test_jsonl_duplicate_slug_skipped(tmp_path, db, created_slugs):
     assert stats.duplicates == 0
     rumor = get_rumor_by_slug(db, base_slug)
     assert rumor is not None
-    created_slugs.append(base_slug)
-    # cleanup the hash-suffixed variant
-    from sqlalchemy import select
-    from src.db.models import Rumor
-    for r in db.execute(select(Rumor).where(Rumor.slug.like(f"{base_slug}-%"))).scalars():
-        created_slugs.append(r.slug)
 
 
-def test_md_import_creates_rumor_and_analysis(tmp_path, db, created_slugs):
+def test_md_import_creates_rumor_and_analysis(tmp_path, db):
     title = f"md-import-{uuid4().hex[:8]}"
     md_content = "Officials clearly debunked this rumor."
     md = write_md(tmp_path, md_content, filename=f"{title}.md")
@@ -251,7 +243,6 @@ def test_md_import_creates_rumor_and_analysis(tmp_path, db, created_slugs):
     expected_slug = f"{slugify(title)}-{hash_suffix(md_content)}"
     rumor = get_rumor_by_slug(db, expected_slug)
     assert rumor is not None
-    created_slugs.append(rumor.slug)
     analysis = get_analysis_by_rumor_id(db, rumor.id)
     assert analysis is not None
     assert analysis.summary == "Fake"

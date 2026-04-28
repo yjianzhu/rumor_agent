@@ -37,6 +37,25 @@
     </p>
   </div>
 
+  <!-- Media -->
+  {% if rumor.media_files %}
+  <div>
+    <h2 class="text-xs font-medium uppercase tracking-widest text-slate-400 mb-2">相关媒体</h2>
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      {% for item in rumor.media_files %}
+      {% if item.type == 'image' %}
+      <figure>
+        <img src="/media/{{ item.path }}" alt="{{ item.caption }}" class="w-full rounded-xl border border-slate-200/60">
+        {% if item.caption %}
+        <figcaption class="text-xs text-slate-400 mt-1.5">{{ item.caption }}</figcaption>
+        {% endif %}
+      </figure>
+      {% endif %}
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
   <!-- Summary -->
   {% if rumor.summary %}
   <div>

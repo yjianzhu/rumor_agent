@@ -1,11 +1,15 @@
+import logging
 import re
 from hashlib import sha1
 from pathlib import Path
 from typing import Protocol
 
+from src.config import settings
 from src.db.models import RumorStatus
 from src.db.schemas import RumorCreate, _RumorSampleIn, StructuredRumorAnalysis
 from src.llm.client import AdkLlmClient
+
+logger = logging.getLogger(__name__)
 
 
 class StructuredAnalyzer(Protocol):
@@ -34,9 +38,25 @@ def analyze_sample(
     model: str | None = None,
     client: StructuredAnalyzer | None = None,
 ) -> StructuredRumorAnalysis:
-    analyzer = client or AdkLlmClient(model=model)
-    result = analyzer.analyze(sample)
-    return normalize_structured_analysis(sample, result)
+    if client is not None:
+        result = client.analyze(sample)
+        return normalize_structured_analysis(sample, result)
+
+    endpoints = settings.llm_endpoint_list
+    last_exc: Exception | None = None
+    for i, ep in enumerate(endpoints):
+        try:
+            c = AdkLlmClient(
+                model=model or ep.model,
+                api_key=ep.api_key,
+                api_base=ep.api_base,
+            )
+            result = c.analyze(sample)
+            return normalize_structured_analysis(sample, result)
+        except Exception as exc:
+            last_exc = exc
+            logger.warning("LLM endpoint %d (%s) failed: %s", i, ep.api_base, exc)
+    raise last_exc  # type: ignore[misc]
 
 
 def analyze_markdown(
@@ -79,7 +99,13 @@ def build_preview_analysis(sample: _RumorSampleIn) -> StructuredRumorAnalysis:
     )
 
 
-def to_rumor_create(data: StructuredRumorAnalysis, *, slug: str, is_published: bool) -> RumorCreate:
+def to_rumor_create(
+    data: StructuredRumorAnalysis,
+    *,
+    slug: str,
+    is_published: bool,
+    media_files: list | None = None,
+) -> RumorCreate:
     return RumorCreate(
         title=data.title,
         slug=slug,
@@ -88,6 +114,7 @@ def to_rumor_create(data: StructuredRumorAnalysis, *, slug: str, is_published: b
         truth_content=data.truth_content,
         status=data.status,
         tags=data.tags,
+        media_files=media_files,
         source_urls=data.source_urls,
         is_published=is_published,
     )

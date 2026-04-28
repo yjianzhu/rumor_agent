@@ -2,6 +2,9 @@
 .env.*
 !.env.example
 
+config.toml
+!config.example.toml
+
 __pycache__/
 *.py[cod]
 *$py.class
@@ -36,3 +39,6 @@ Thumbs.db
 
 front_end.md
 review*.md
+
+cli_tools/
+data/

@@ -164,7 +164,7 @@ class TestBatchCommit:
 class TestSemanticDedup:
     def test_high_similarity_rejected(self):
         """When get_embedding returns identical vectors, dedup should reject."""
-        from src.main import _resolve_slug_direct
+        from src.main import _resolve_slug
         vec = [1.0] * settings.EMBEDDING_DIM
 
         db = MagicMock()
@@ -174,30 +174,30 @@ class TestSemanticDedup:
             similar_rumor = MagicMock()
             similar_rumor.slug = "existing-slug"
             with patch("src.main.find_similar_rumor", return_value=similar_rumor):
-                result = _resolve_slug_direct(db, "test-slug", "content", vec)
+                result = _resolve_slug(db, "test-slug", "content", vec)
 
         assert result is None  # rejected as duplicate
 
     def test_low_similarity_passes(self):
         """When find_similar_rumor returns None, slug should be returned."""
-        from src.main import _resolve_slug_direct
+        from src.main import _resolve_slug
 
         vec = [1.0] * settings.EMBEDDING_DIM
 
         db = MagicMock()
         with patch("src.main.get_rumor_by_slug", return_value=None):
             with patch("src.main.find_similar_rumor", return_value=None):
-                result = _resolve_slug_direct(db, "test-slug", "content", vec)
+                result = _resolve_slug(db, "test-slug", "content", vec)
 
         assert result == "test-slug"
 
     def test_no_embedding_falls_back_to_hash(self):
         """When embedding is None, only hash dedup applies."""
-        from src.main import _resolve_slug_direct
+        from src.main import _resolve_slug
 
         db = MagicMock()
         with patch("src.main.get_rumor_by_slug", return_value=None):
-            result = _resolve_slug_direct(db, "test-slug", "content", None)
+            result = _resolve_slug(db, "test-slug", "content", None)
 
         assert result == "test-slug"
 

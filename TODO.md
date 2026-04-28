@@ -1,6 +1,6 @@
 # Rumor Agent - 项目开发 TODO
 
-> 更新时间：2026-03-10
+> 更新时间：2026-04-06
 >
 > **项目目标**：构建一个智能辟谣 Agent 系统，能够自动爬取网络谣言案例、存入数据库，并通过 LLM Agent 完成事实核查、分类与分析，最终输出结构化的辟谣结果。
 
@@ -12,7 +12,7 @@
 |------|------|------|
 | Phase 0 | 基础设施 & 数据库 | ✅ 已完成 |
 | Phase 1 | 数据库接入层（CRUD） | ✅ 已完成 |
-| Phase 2 | 爬虫 Agent（案例采集） | ⬜ 未开始 |
+| Phase 2 | 多平台采集（XHS + Bilibili） | ✅ 已完成（持续优化） |
 | Phase 3 | 主程序流程串联 | ✅ 已完成 |
 | Phase 4 | LLM 分析核心 | ✅ 基本完成（批量分析待实现） |
 
@@ -57,46 +57,36 @@
 
 ---
 
-## Phase 2：爬虫 Agent（案例采集）⬜
+## Phase 2：多平台采集（XHS + Bilibili）✅
 
-> **目标**：编写一个 Agent，能够从主流辟谣/事实核查网站自动爬取谣言案例，解析结构化字段，并调用 Phase 1 的 CRUD 层写入数据库。
+> **目标**：从社媒平台采集候选内容（当前已接入 Bilibili / 小红书），产出统一 raw JSONL 供后续 triage/fusion/import 使用。
 
-### 2.1 确定目标数据源
-- [ ] 整理可爬取的辟谣网站列表，例如：
-  - [较真](https://vp.fact.qq.com/) — 腾讯事实核查平台
-  - [谣言终结者](https://www.piyao.org.cn/) — 官方辟谣平台
-  - 其他：微博超话、人民网辟谣专区等
-- [ ] 分析目标网页结构，确定爬取策略（静态 HTML / 动态 JS 渲染 / API 接口）
+### 2.1 已完成能力
+- [x] Bilibili 采集器：`src/ingest/bilibili_collector.py`
+  - 关键词检索、排序、分页、日期范围（CLI 默认“昨天到今天”）
+  - 输出 `data/staging/raw/bili_*.jsonl`
+- [x] 小红书采集器：`src/ingest/xhs_collector.py`
+  - MCP 登录检查、搜索、详情补全（description）
+  - 支持 `sort_by / publish_time / note_type` 过滤
+  - 输出 `data/staging/raw/xhs_*.jsonl`
+- [x] Stage 1 CLI 接入：`src/main.py`
+  - `--collect-bili KEYWORD`
+  - `--collect-xhs KEYWORD`
+- [x] 测试覆盖
+  - `tests/test_bili_collector.py`
+  - `tests/test_xhs_collector.py`
+- [ ] 添加评论获取功能，可能正文和视频描述都没有关键信息，从评论区可以获取TODO
 
-### 2.2 项目依赖更新 `requirements.txt`
-- [ ] 添加爬虫相关依赖：
-  - `httpx` 或 `requests` — HTTP 请求
-  - `playwright` 或 `selenium` — 动态页面渲染（如需）
-  - `beautifulsoup4` + `lxml` — HTML 解析
-  - `langchain` 或 `google-generativeai` — LLM 辅助解析（可选）
+### 2.2 现状约定（raw 文件）
+- [x] `raw` 每行不再重复写 `platform` / `fetched_at`
+- [x] 平台与时间由文件名表达（如 `bili_20260406_222916.jsonl`）
+- [x] 规则文档：`docs/collector_search_defaults.md`
 
-### 2.3 创建 `src/crawler/` 模块
-- [ ] `src/crawler/__init__.py`
-- [ ] `src/crawler/base_crawler.py` — 基础爬虫抽象类
-  - 定义接口 `fetch_list()` → 获取案例列表页
-  - 定义接口 `fetch_detail(url)` → 解析单条详情页
-  - 定义接口 `parse_to_schema(raw_data) -> RumorCreate` → 转换为标准 Schema
-- [ ] `src/crawler/piyao_crawler.py` — 官方辟谣平台爬虫（继承 `BaseCrawler`）
-- [ ] `src/crawler/qq_fact_crawler.py` — 腾讯较真平台爬虫（继承 `BaseCrawler`）
-- [ ] `src/crawler/utils.py` — 公共工具函数
-  - `slugify(title: str) -> str` — 从标题生成 URL slug
-  - `clean_html(html: str) -> str` — 清理 HTML 标签
-  - `extract_source_urls(html) -> list[str]` — 提取来源链接
-
-### 2.4 爬虫 Agent 主控制器
-- [ ] `src/crawler/agent.py` — `CrawlerAgent` 类
-  - `run(sources: list[str], max_per_source: int = 50)` — 批量运行爬虫
-  - 调用 CRUD 层写入数据库（幂等，已存在则跳过）
-  - 记录爬取进度与错误日志
-
-### 2.5 测试爬虫
-- [ ] `scripts/run_crawler.py` — 爬虫独立运行脚本（单次测试）
-- [ ] 验证 5~10 条数据能正确写入数据库
+### 2.3 下一步优化（Phase 2 持续项）
+- [ ] 去重与清洗增强（空标题/空作者/重复 note_id、bvid）
+- [ ] 主题相关性粗筛（降低低相关噪声）
+- [ ] 采集质量指标（空内容率、可研判率、去重后留存率）
+- [ ] 增加更多平台适配器（在 `src/ingest/` 扩展）
 
 ---
 
@@ -189,6 +179,6 @@ rumor_agent/
 
 ## 当前下一步行动
 
-1. **Phase 2 — 爬虫 Agent**：确定目标数据源，开始实现采集模块
+1. **采集质量优化**：完善 raw 清洗、去重、相关性评分
 2. **批量分析**：实现 `--analyze` 参数对已入库但未分析的记录进行批量 LLM 处理
 3. **小改进**：`src/db/base.py` 中 `declarative_base()` 迁移到 SQLAlchemy 2.0 `DeclarativeBase`

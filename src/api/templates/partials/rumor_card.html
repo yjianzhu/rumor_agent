@@ -5,30 +5,36 @@
   'OUTDATED': 'bg-slate-100 text-slate-500'
 } %}
 
-<a href="/rumors/{{ rumor.slug }}" class="block bg-white rounded-xl border border-slate-200/60 p-5 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-200">
-  <!-- Header: status + date -->
-  <div class="flex items-center justify-between mb-2">
-    <span class="px-2.5 py-0.5 rounded-full text-xs font-medium {{ status_colors.get(rumor.status.value, 'bg-slate-100 text-slate-500') }}">
-      {{ rumor.status.value }}
-    </span>
-    <span class="text-xs text-slate-400">{{ rumor.created_at.strftime('%Y-%m-%d') }}</span>
-  </div>
+<a href="/rumors/{{ rumor.slug }}" class="block bg-white rounded-xl border border-slate-200/60 overflow-hidden shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-200">
+  {% if rumor.media_files %}
+  <img src="/media/{{ rumor.media_files[0].path }}" alt="{{ rumor.media_files[0].caption }}" class="w-full h-40 object-cover">
+  {% endif %}
 
-  <!-- Title -->
-  <h3 class="text-[15px] font-medium text-slate-800 line-clamp-2 mb-1">{{ rumor.title }}</h3>
+  <div class="p-5">
+    <!-- Header: status + date -->
+    <div class="flex items-center justify-between mb-2">
+      <span class="px-2.5 py-0.5 rounded-full text-xs font-medium {{ status_colors.get(rumor.status.value, 'bg-slate-100 text-slate-500') }}">
+        {{ rumor.status.value }}
+      </span>
+      <span class="text-xs text-slate-400">{{ rumor.created_at.strftime('%Y-%m-%d') }}</span>
+    </div>
 
-  <!-- Preview -->
-  <p class="text-xs text-slate-500 line-clamp-3 mb-3">{{ rumor.summary or rumor.rumor_content or '' }}</p>
+    <!-- Title -->
+    <h3 class="text-[15px] font-medium text-slate-800 line-clamp-2 mb-1">{{ rumor.title }}</h3>
 
-  <!-- Tags -->
-  {% if rumor.tags %}
-  <div class="flex flex-wrap gap-1">
-    {% for t in rumor.tags[:4] %}
-    <span class="text-xs bg-slate-100/80 text-slate-500 px-1.5 py-0.5 rounded-md">#{{ t }}</span>
-    {% endfor %}
-    {% if rumor.tags | length > 4 %}
-    <span class="text-xs text-slate-400">+{{ rumor.tags | length - 4 }}</span>
+    <!-- Preview -->
+    <p class="text-xs text-slate-500 line-clamp-3 mb-3">{{ rumor.summary or rumor.rumor_content or '' }}</p>
+
+    <!-- Tags -->
+    {% if rumor.tags %}
+    <div class="flex flex-wrap gap-1">
+      {% for t in rumor.tags[:4] %}
+      <span class="text-xs bg-slate-100/80 text-slate-500 px-1.5 py-0.5 rounded-md">#{{ t }}</span>
+      {% endfor %}
+      {% if rumor.tags | length > 4 %}
+      <span class="text-xs text-slate-400">+{{ rumor.tags | length - 4 }}</span>
+      {% endif %}
+    </div>
     {% endif %}
   </div>
-  {% endif %}
 </a>

@@ -1,0 +1,62 @@
+# Rumor Agent 配置文件
+# 复制本文件为 config.toml 并填入实际值
+
+[database]
+user = "postgres"
+password = "password"
+host = "localhost"
+port = 5432
+name = "rumor_agent"
+
+[llm]
+model = "openai/gpt-4o-mini"
+temperature = 0.0
+max_retries = 3
+max_input_chars = 30000
+
+# 可配置多个 LLM endpoint，系统会按顺序尝试，实现自动 fallback
+# api_style: "chat" = /chat/completions (默认), "responses" = /responses (OpenAI Responses API)
+#
+# [[llm.endpoints]]
+# api_key = "sk-your-key-1"
+# api_base = "https://api.example.com/v1"
+# model = "gpt-4o-mini"
+# api_style = "chat"
+#
+# [[llm.endpoints]]
+# api_key = "sk-your-key-2"
+# api_base = "https://api.openai.com/v1"
+# model = "gpt-4.1"
+# api_style = "responses"
+
+[embedding]
+model = "openai/Qwen/Qwen3-Embedding-4B"
+dim = 2560
+dedup_similarity_threshold = 0.92
+
+# 同样支持多个 embedding endpoint
+# [[embedding.endpoints]]
+# api_key = "sk-your-key"
+# api_base = "https://api.example.com/v1"
+# model = "Qwen/Qwen3-Embedding-4B"
+
+[xhs]
+# 小红书 MCP 服务地址（需先启动 xiaohongshu-mcp-windows-amd64.exe）
+mcp_url = "http://127.0.0.1:18060/mcp"
+max_items = 20
+max_retries = 3
+# 每次请求间隔随机范围（秒）
+delay_range = [1.5, 4.0]
+# 重试前额外等待随机范围（秒）
+retry_delay_range = [3.0, 6.0]
+
+[collect]
+# 批量采集关键词列表
+# 当 --collect-bili / --collect-xhs 不带参数时，自动遍历此列表
+keywords = ["谣言", "辟谣", "网传"]
+# Bilibili 最小播放量过滤，低于此值的视频视为推广/无效内容
+bili_min_play = 100
+
+[general]
+media_dir = "media"
+import_batch_size = 50

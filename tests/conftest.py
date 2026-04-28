@@ -2,9 +2,9 @@ import json
 from pathlib import Path
 
 import pytest
+from sqlalchemy.orm import Session
 
-from src.db.base import SessionLocal
-from src.db.crud import delete_rumor, get_analysis_by_rumor_id, get_rumor_by_slug
+from src.db.base import engine
 
 
 # ─── Shared helpers ──────────────────────────────────────────────────────────
@@ -37,24 +37,31 @@ class FakeAnalyzer:
         return response
 
 
-# ─── Shared fixtures ─────────────────────────────────────────────────────────
+# ─── DB fixture: transaction rollback ────────────────────────────────────────
 
 @pytest.fixture
-def db():
-    session = SessionLocal()
+def db(monkeypatch):
+    """Session wrapped in a transaction that rolls back after the test.
+
+    ``SessionLocal`` is monkeypatched so that production code
+    (``import_jsonl_file``, ``import_md_file``, etc.) shares the same
+    connection / transaction.  No manual cleanup needed.
+    """
+    connection = engine.connect()
+    transaction = connection.begin()
+    session = Session(bind=connection, join_transaction_mode="create_savepoint")
+
+    factory = lambda: session
+    monkeypatch.setattr("src.db.base.SessionLocal", factory)
+    monkeypatch.setattr("src.main.SessionLocal", factory)
+
+    # Prevent production code from closing our controlled session
+    real_close = session.close
+    session.close = lambda: None
+
     yield session
+
+    session.close = real_close
+    transaction.rollback()
     session.close()
-
-
-@pytest.fixture
-def created_slugs(db):
-    slugs: list[str] = []
-    yield slugs
-    for slug in slugs:
-        rumor = get_rumor_by_slug(db, slug)
-        if rumor:
-            analysis = get_analysis_by_rumor_id(db, rumor.id)
-            if analysis:
-                db.delete(analysis)
-            delete_rumor(db, rumor.id)
-    db.commit()
+    connection.close()

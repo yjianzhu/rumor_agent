@@ -73,7 +73,7 @@ class RumorOut(BaseModel):
     status: RumorStatus
     tags: list[str] | None
     media_files: list[MediaItem] | None
-    source_urls: list | None
+    source_urls: list[str] | None
     view_count: int
     is_published: bool
     created_at: datetime
@@ -117,7 +117,7 @@ class AnalysisResultCreate(BaseModel):
 
 
 class AnalysisResultOut(BaseModel):
-    id: int
+    id: UUID
     rumor_id: UUID
     summary: str | None
     truthfulness_score: float
