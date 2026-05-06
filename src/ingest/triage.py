@@ -18,7 +18,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from src.config import settings
+from src.llm.client import chat as llm_chat
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +109,39 @@ def _get_url(record: dict[str, Any]) -> str:
     return record.get("arcurl") or record.get("source_url") or ""
 
 
+def _get_raw_id(record: dict[str, Any]) -> str:
+    return record.get("bvid") or record.get("note_id") or record.get("id") or ""
+
+
+def _platform_from_record(record: dict[str, Any]) -> str:
+    url = _get_url(record)
+    if record.get("bvid") or "bilibili.com" in url:
+        return "bilibili"
+    if record.get("note_id") or "xiaohongshu.com" in url:
+        return "xhs"
+    return ""
+
+
+def _source_ref(record: dict[str, Any]) -> dict[str, str]:
+    ref = {"url": _get_url(record)}
+    raw_id = _get_raw_id(record)
+    if raw_id:
+        ref["raw_id"] = raw_id
+    platform = _platform_from_record(record)
+    if platform:
+        ref["platform"] = platform
+    return ref
+
+
+def _build_source_lookup(records: list[dict[str, Any]]) -> dict[str, dict[str, str]]:
+    lookup: dict[str, dict[str, str]] = {}
+    for record in records:
+        url = _get_url(record)
+        if url and url not in lookup:
+            lookup[url] = _source_ref(record)
+    return lookup
+
+
 def _build_llm_input(records: list[dict[str, Any]], keyword: str = "") -> str:
     items = []
     for r in records:
@@ -138,63 +171,20 @@ def _normalize_controversy_type(raw_type: Any) -> str:
     return value
 
 
-def _truncate_exc(exc: Exception, limit: int = 300) -> str:
-    """Return a concise string for *exc*, collapsing HTML / huge payloads."""
-    msg = str(exc)
-    if "<html" in msg.lower() or "<head" in msg.lower():
-        # WAF / Cloudflare challenge pages can be 100 KB+; extract just the title.
-        import re
-        title = re.search(r"<title>(.*?)</title>", msg, re.IGNORECASE | re.DOTALL)
-        hint = title.group(1).strip() if title else "HTML error page"
-        return f"{type(exc).__name__}: server returned HTML ({hint})"
-    if len(msg) > limit:
-        return f"{type(exc).__name__}: {msg[:limit]}…"
-    return f"{type(exc).__name__}: {msg}"
+def _parse_events(
+    raw_response: str,
+    *,
+    allowed_urls: set[str] | None = None,
+    source_lookup: dict[str, dict[str, str]] | None = None,
+) -> list[dict[str, Any]]:
+    """Parse the LLM JSON array response into a list of controversy events.
 
-
-def _call_llm_curl(ep, model: str, messages: list[dict], temperature: float) -> str:
-    """Call an OpenAI-compatible endpoint via curl_cffi (browser TLS fingerprint)."""
-    from curl_cffi import requests as curl_requests
-
-    url = f"{ep.api_base.rstrip('/')}/chat/completions"
-    headers = {"Content-Type": "application/json"}
-    if ep.api_key:
-        headers["Authorization"] = f"Bearer {ep.api_key}"
-
-    payload = {"model": model, "messages": messages, "temperature": temperature}
-    resp = curl_requests.post(
-        url, json=payload, headers=headers,
-        impersonate="chrome136", timeout=120,
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    return data["choices"][0]["message"]["content"].strip()
-
-
-def _call_llm(prompt: str, user_content: str) -> str:
-    """Try each endpoint with curl_cffi (bypasses WAF TLS fingerprinting)."""
-    endpoints = settings.llm_endpoint_list
-    messages = [
-        {"role": "system", "content": prompt},
-        {"role": "user", "content": user_content},
-    ]
-    last_exc: Exception | None = None
-    for i, ep in enumerate(endpoints):
-        api_base = ep.api_base or "(default)"
-        model = ep.model or settings.LLM_MODEL
-        try:
-            return _call_llm_curl(ep, model, messages, temperature=0.0)
-        except Exception as exc:
-            last_exc = exc
-            logger.warning("Triage LLM endpoint %d (%s) failed: %s", i, api_base, _truncate_exc(exc))
-    raise RuntimeError(
-        f"All {len(endpoints)} LLM endpoints failed for triage. "
-        f"Last error: {_truncate_exc(last_exc)}"  # type: ignore[arg-type]
-    )
-
-
-def _parse_events(raw_response: str) -> list[dict[str, Any]]:
-    """Parse the LLM JSON array response into a list of controversy events."""
+    When ``allowed_urls`` is provided, every event's ``source_urls`` is filtered
+    to keep only URLs that appeared in the raw input pool — drops LLM-fabricated
+    URLs. Events that end up with no allowed sources are dropped entirely. When
+    ``source_lookup`` is provided, matched raw item IDs are copied into
+    ``source_refs`` for candidate-level traceability.
+    """
     text = raw_response.strip()
     if text.startswith("```"):
         text = re.sub(r"^```\w*\n?", "", text)
@@ -210,12 +200,35 @@ def _parse_events(raw_response: str) -> list[dict[str, Any]]:
         title = (item.get("title") or "").strip()
         if not title:
             continue
-        events.append({
+
+        urls = [u for u in (item.get("source_urls") or []) if isinstance(u, str)]
+        if allowed_urls is not None:
+            original_count = len(urls)
+            urls = [u for u in urls if u in allowed_urls]
+            dropped = original_count - len(urls)
+            if dropped:
+                logger.warning(
+                    "Triage: dropped %d hallucinated URL(s) from event %r",
+                    dropped, title[:40],
+                )
+            if not urls:
+                logger.warning(
+                    "Triage: event %r has no allowed source_urls after filtering, dropping",
+                    title[:40],
+                )
+                continue
+
+        event = {
             "title": title,
             "content": (item.get("content") or "").strip(),
-            "source_urls": item.get("source_urls") or [],
+            "source_urls": urls,
             "controversy_type": _normalize_controversy_type(item.get("controversy_type")),
-        })
+        }
+        if source_lookup is not None:
+            refs = [source_lookup[u] for u in urls if u in source_lookup]
+            if refs:
+                event["source_refs"] = refs
+        events.append(event)
     return events
 
 
@@ -272,8 +285,15 @@ def triage_raw_jsonl(
     else:
         keyword_for_prompt = "、".join(sorted(keywords)) if keywords else ""
         llm_input = _build_llm_input(surviving, keyword=keyword_for_prompt)
-        llm_raw = _call_llm(_build_triage_prompt(keyword_for_prompt), llm_input)
-        events = _parse_events(llm_raw)
+        llm_raw = llm_chat(_build_triage_prompt(keyword_for_prompt), llm_input)
+        # Build the allowed-URL set from the raw inputs so the LLM cannot
+        # fabricate sources that were never seen.
+        allowed_urls = {url for url in (_get_url(r) for r in surviving) if url}
+        events = _parse_events(
+            llm_raw,
+            allowed_urls=allowed_urls,
+            source_lookup=_build_source_lookup(surviving),
+        )
 
     keyword_tag = list(keywords)[0] if len(keywords) == 1 else None
     for ev in events:

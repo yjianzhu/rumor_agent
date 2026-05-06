@@ -3,6 +3,17 @@
 {% block title %}Rumor Agent — 谣言浏览{% endblock %}
 
 {% block content %}
+<!-- View tabs -->
+<div class="flex items-center gap-1 mb-4 text-sm">
+  {% set tabs = [('pending', '待审核'), ('published', '已发布'), ('all', '全部')] %}
+  {% for v, label in tabs %}
+  <a
+    href="/?view={{ v }}{% if q %}&q={{ q }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if tag %}&tag={{ tag }}{% endif %}"
+    class="px-3 py-1.5 rounded-full font-medium transition-colors duration-150 {% if view == v %}bg-indigo-600 text-white{% else %}text-slate-500 hover:text-slate-800 hover:bg-slate-100/80{% endif %}"
+  >{{ label }}</a>
+  {% endfor %}
+</div>
+
 <!-- Toolbar -->
 <div class="bg-white rounded-xl border border-slate-200/60 shadow-sm p-4 mb-6">
   <div class="flex flex-wrap items-center gap-3">
@@ -15,7 +26,7 @@
       hx-get="/partials/rumors"
       hx-trigger="input changed delay:300ms, search"
       hx-target="#rumor-list"
-      hx-include="[name='status'],[name='tag']"
+      hx-include="[name='status'],[name='tag'],[name='view']"
       hx-indicator="#loading"
     >
 
@@ -25,7 +36,7 @@
       hx-get="/partials/rumors"
       hx-trigger="change"
       hx-target="#rumor-list"
-      hx-include="[name='q'],[name='tag']"
+      hx-include="[name='q'],[name='tag'],[name='view']"
     >
       <option value="">全部状态</option>
       <option value="FAKE" {% if status == 'FAKE' %}selected{% endif %}>FAKE</option>
@@ -40,13 +51,15 @@
       hx-get="/partials/rumors"
       hx-trigger="change"
       hx-target="#rumor-list"
-      hx-include="[name='q'],[name='status']"
+      hx-include="[name='q'],[name='status'],[name='view']"
     >
       <option value="">全部标签</option>
       {% for t in tags %}
       <option value="{{ t }}" {% if tag == t %}selected{% endif %}>{{ t }}</option>
       {% endfor %}
     </select>
+
+    <input type="hidden" name="view" value="{{ view }}">
 
     <span id="loading" class="htmx-indicator text-sm text-slate-400 flex items-center gap-1.5">
       <svg class="animate-spin h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -64,7 +77,7 @@
 </div>
 
 <!-- Rumor list -->
-<div id="rumor-list">
+<div id="rumor-list" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
   {% include "partials/rumor_list.html" %}
 </div>
 {% endblock %}

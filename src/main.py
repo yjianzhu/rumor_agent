@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 import sys
 from typing import Any, TextIO
@@ -31,7 +31,7 @@ from src.db.crud import create_analysis_result, create_rumor, find_similar_rumor
 from src.db.models import Rumor, RumorStatus
 from src.db.schemas import AnalysisResultCreate, RumorCreate, RumorDirectIn
 from src.embedding import get_embedding
-from src.ingest.readers import read_fused_json_record, read_markdown_sample
+from src.ingest.readers import read_markdown_sample
 
 
 @dataclass
@@ -40,6 +40,25 @@ class ImportStats:
     succeeded: int = 0
     failed: int = 0
     duplicates: int = 0
+
+
+@dataclass
+class PipelineSummary:
+    """Result summary for a full --run-pipeline execution."""
+    keywords: int = 0
+    raw_files: list[Path] = field(default_factory=list)
+    candidate_file: Path | None = None
+    import_stats: ImportStats | None = None
+    collect_failures: list[str] = field(default_factory=list)
+    triage_failed: bool = False
+
+    @property
+    def failed(self) -> bool:
+        if self.triage_failed:
+            return True
+        if self.import_stats and self.import_stats.failed > 0:
+            return True
+        return False
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -92,17 +111,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Import candidate JSONL (controversy events) into database as DUBIOUS rumors",
     )
     group.add_argument(
-        "--fuse-jsonl",
-        type=Path,
-        metavar="FILE",
-        nargs="+",
-        help="(Legacy) Stage 3: Fuse candidate JSONL(s) → fused JSONL",
-    )
-    group.add_argument(
-        "--import-fused-jsonl",
-        type=Path,
-        metavar="FILE",
-        help="(Legacy) Stage 4: Import fused JSONL into database via LLM analysis",
+        "--run-pipeline",
+        action="store_true",
+        help="Full pipeline: collect-bili + collect-xhs (per [collect].keywords) → triage → import-candidate. "
+             "Designed for OS-level scheduling (cron / Task Scheduler).",
     )
 
     parser.add_argument("--limit", type=int, help="Maximum number of records to process")
@@ -122,7 +134,7 @@ def build_parser() -> argparse.ArgumentParser:
     # Xiaohongshu collection options
     parser.add_argument("--xhs-sort-by", default="最多评论",
                         choices=["综合", "最新", "最多点赞", "最多评论", "最多收藏"],
-                        help="Sort order for --collect-xhs (default: 综合)")
+                        help="Sort order for --collect-xhs (default: 最多评论)")
     parser.add_argument("--xhs-publish-time", default="一天内",
                         choices=["不限", "一天内", "一周内", "半年内"],
                         help="Publish time filter for --collect-xhs (default: 一天内)")
@@ -217,25 +229,9 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0 if stats.failed == 0 else 1
 
-    if args.fuse_jsonl:
-        from src.ingest.fusion import fuse_candidates
-        paths = args.fuse_jsonl if isinstance(args.fuse_jsonl, list) else [args.fuse_jsonl]
-        out = fuse_candidates(paths)
-        logger.info("Stage 3 done → %s", out)
-        return 0
-
-    if args.import_fused_jsonl:
-        stats = import_fused_jsonl(
-            args.import_fused_jsonl,
-            limit=args.limit,
-            dry_run=args.dry_run,
-            model=args.model,
-        )
-        logger.info(
-            "Stage 4 done. processed=%d succeeded=%d failed=%d duplicates=%d",
-            stats.processed, stats.succeeded, stats.failed, stats.duplicates,
-        )
-        return 0 if stats.failed == 0 else 1
+    if args.run_pipeline:
+        summary = run_pipeline()
+        return 1 if summary.failed else 0
 
     logger.info("Network Rumor Agent initialized.")
     logger.info("Database models loaded.")
@@ -264,7 +260,7 @@ def import_jsonl_file(
     import sys
     stream = output or sys.stdout
     stats = ImportStats()
-    db = None if dry_run else SessionLocal()
+    db = SessionLocal()
 
     try:
         with path.open("r", encoding="utf-8") as handle:
@@ -279,18 +275,17 @@ def import_jsonl_file(
 
                 try:
                     record = RumorDirectIn.model_validate_json(raw_line)
-                    slug = record.slug or slugify(record.title)
+                    base_slug = record.slug or slugify(record.title)
+                    dedup_content = f"{record.title}\n{record.rumor_content or ''}"
 
-                    if not dry_run:
-                        # generate embedding once — used for both dedup and storage
-                        dedup_content = f"{record.title}\n{record.rumor_content or ''}"
-                        emb = _safe_get_embedding(dedup_content)
-                        resolved = _resolve_slug(db, slug, dedup_content, emb)
-                        if resolved is None:
-                            stats.duplicates += 1
-                            logger.warning("Line %d: duplicate rumor skipped (slug=%s)", line_no, slug)
-                            continue
-                        slug = resolved
+                    # dry-run: skip embedding API but still hit DB for slug/hash dedup
+                    emb = None if dry_run else _safe_get_embedding(dedup_content)
+                    resolved = _resolve_slug(db, base_slug, dedup_content, emb)
+                    if resolved is None:
+                        stats.duplicates += 1
+                        logger.warning("Line %d: duplicate rumor skipped (slug=%s)", line_no, base_slug)
+                        continue
+                    slug = resolved
 
                     rumor_data = RumorCreate(
                         title=record.title,
@@ -354,12 +349,12 @@ def import_jsonl_file(
                     stats.failed += 1
                     logger.error("Line %d: %s", line_no, exc)
 
-            # flush remaining
-            if db is not None and pending_count > 0:
+            if dry_run:
+                db.rollback()
+            elif pending_count > 0:
                 db.commit()
     finally:
-        if db is not None:
-            db.close()
+        db.close()
 
     return stats
 
@@ -430,18 +425,25 @@ def import_md_file(
     stream = output or sys.stdout
     stats = ImportStats()
     stats.processed = 1
-    db = None if dry_run else SessionLocal()
+    db = SessionLocal()
 
     try:
         sample, media_items, raw_text = read_markdown_sample(path)
+        structured = analyze_sample(sample, model=model, client=analyzer)
+
+        emb = None if dry_run else _safe_get_embedding(raw_text)
+        slug = _resolve_slug(db, slugify(structured.title), raw_text, emb, always_hash=True)
+        if slug is None:
+            stats.duplicates = 1
+            logger.warning("Duplicate rumor skipped for: %s", path.name)
+            return stats
+
+        rumor_data = to_rumor_create(structured, slug=slug, is_published=False, media_files=media_items)
 
         if dry_run:
-            structured = analyze_sample(sample, model=model, client=analyzer)
-            content_hash = hash_suffix(raw_text)
-            slug = f"{slugify(structured.title)}-{content_hash}"
             print_preview(stream, 1, {
                 "slug": slug,
-                "rumor": to_rumor_create(structured, slug=slug, is_published=False, media_files=media_items).model_dump(mode="json"),
+                "rumor": rumor_data.model_dump(mode="json"),
                 "analysis": {
                     "analysis_summary": structured.analysis_summary,
                     "truthfulness_score": structured.truthfulness_score,
@@ -451,15 +453,6 @@ def import_md_file(
             stats.succeeded = 1
             return stats
 
-        structured = analyze_sample(sample, model=model, client=analyzer)
-        emb = _safe_get_embedding(raw_text)
-        slug = _resolve_slug(db, slugify(structured.title), raw_text, emb, always_hash=True)
-        if slug is None:
-            stats.duplicates = 1
-            logger.warning("Duplicate rumor skipped for: %s", path.name)
-            return stats
-
-        rumor_data = to_rumor_create(structured, slug=slug, is_published=False, media_files=media_items)
         rumor = create_rumor(db, rumor_data)
         if emb is not None:
             rumor.embedding = emb
@@ -481,111 +474,11 @@ def import_md_file(
     except Exception as exc:
         stats.failed = 1
         logger.error("Failed to import %s: %s", path.name, exc)
-        if db is not None:
+        db.rollback()
+    finally:
+        if dry_run:
             db.rollback()
-    finally:
-        if db is not None:
-            db.close()
-
-    return stats
-
-
-# ─── Fused JSONL import (Stage 4) ─────────────────────────────────────────────
-
-def import_fused_jsonl(
-    path: Path,
-    *,
-    limit: int | None = None,
-    dry_run: bool = False,
-    model: str | None = None,
-    output: TextIO | None = None,
-    analyzer=None,
-) -> ImportStats:
-    """Read a fused JSONL file, run LLM analysis, and import to the database."""
-    import sys
-    stream = output or sys.stdout
-    stats = ImportStats()
-    db = None if dry_run else SessionLocal()
-
-    try:
-        with path.open("r", encoding="utf-8") as handle:
-            pending_count = 0
-            for line_no, raw_line in enumerate(handle, start=1):
-                if limit is not None and stats.processed >= limit:
-                    break
-                if not raw_line.strip():
-                    continue
-
-                stats.processed += 1
-
-                try:
-                    sample, raw_text = read_fused_json_record(raw_line)
-
-                    if dry_run:
-                        structured = analyze_sample(sample, model=model, client=analyzer)
-                        content_hash = hash_suffix(raw_text)
-                        slug = f"{slugify(structured.title)}-{content_hash}"
-                        print_preview(stream, line_no, {
-                            "slug": slug,
-                            "rumor": to_rumor_create(
-                                structured, slug=slug, is_published=False,
-                            ).model_dump(mode="json"),
-                            "analysis": {
-                                "analysis_summary": structured.analysis_summary,
-                                "truthfulness_score": structured.truthfulness_score,
-                                "evidence": structured.evidence,
-                            },
-                        })
-                        stats.succeeded += 1
-                        continue
-
-                    structured = analyze_sample(sample, model=model, client=analyzer)
-                    emb = _safe_get_embedding(raw_text)
-                    slug = _resolve_slug(db, slugify(structured.title), raw_text, emb, always_hash=True)
-                    if slug is None:
-                        stats.duplicates += 1
-                        logger.warning("Line %d: duplicate rumor skipped", line_no)
-                        continue
-
-                    rumor_data = to_rumor_create(
-                        structured, slug=slug, is_published=False,
-                    )
-                    savepoint = db.begin_nested()
-                    try:
-                        rumor = create_rumor(db, rumor_data)
-                        if emb is not None:
-                            rumor.embedding = emb
-
-                        create_analysis_result(
-                            db,
-                            AnalysisResultCreate(
-                                rumor_id=rumor.id,
-                                summary=structured.analysis_summary,
-                                truthfulness_score=structured.truthfulness_score,
-                                evidence=structured.evidence,
-                                model_name=model or settings.LLM_MODEL,
-                            ),
-                        )
-                        savepoint.commit()
-                        pending_count += 1
-                        stats.succeeded += 1
-
-                        if pending_count >= settings.IMPORT_BATCH_SIZE:
-                            db.commit()
-                            pending_count = 0
-                    except Exception:
-                        savepoint.rollback()
-                        raise
-
-                except Exception as exc:
-                    stats.failed += 1
-                    logger.error("Line %d: %s", line_no, exc)
-
-            if db is not None and pending_count > 0:
-                db.commit()
-    finally:
-        if db is not None:
-            db.close()
+        db.close()
 
     return stats
 
@@ -607,7 +500,7 @@ def import_candidate_jsonl(
     import sys
     stream = output or sys.stdout
     stats = ImportStats()
-    db = None if dry_run else SessionLocal()
+    db = SessionLocal()
 
     try:
         with path.open("r", encoding="utf-8") as handle:
@@ -634,27 +527,14 @@ def import_candidate_jsonl(
                         continue
 
                     tags = [t for t in [keyword, controversy_type] if t]
-                    slug = slugify(title)
+                    base_slug = slugify(title)
                     dedup_content = f"{title}\n{content}"
 
-                    if dry_run:
-                        preview = {
-                            "title": title,
-                            "slug": slug,
-                            "summary": content,
-                            "tags": tags,
-                            "source_urls": source_urls,
-                            "status": "DUBIOUS",
-                        }
-                        print_preview(stream, line_no, preview)
-                        stats.succeeded += 1
-                        continue
-
-                    emb = _safe_get_embedding(dedup_content)
-                    resolved = _resolve_slug(db, slug, dedup_content, emb, always_hash=True)
+                    emb = None if dry_run else _safe_get_embedding(dedup_content)
+                    resolved = _resolve_slug(db, base_slug, dedup_content, emb, always_hash=True)
                     if resolved is None:
                         stats.duplicates += 1
-                        logger.info("Line %d: duplicate skipped (slug=%s)", line_no, slug)
+                        logger.info("Line %d: duplicate skipped (slug=%s)", line_no, base_slug)
                         continue
 
                     rumor_data = RumorCreate(
@@ -668,6 +548,11 @@ def import_candidate_jsonl(
                         source_urls=source_urls or None,
                         is_published=False,
                     )
+
+                    if dry_run:
+                        print_preview(stream, line_no, rumor_data.model_dump(mode="json"))
+                        stats.succeeded += 1
+                        continue
 
                     savepoint = db.begin_nested()
                     try:
@@ -689,13 +574,88 @@ def import_candidate_jsonl(
                     stats.failed += 1
                     logger.error("Line %d: %s", line_no, exc)
 
-            if db is not None and pending_count > 0:
+            if dry_run:
+                db.rollback()
+            elif pending_count > 0:
                 db.commit()
     finally:
-        if db is not None:
-            db.close()
+        db.close()
 
     return stats
+
+
+# ─── Full pipeline (Stage 1 + 2 + 3) ─────────────────────────────────────────
+
+def run_pipeline() -> PipelineSummary:
+    """Collect (Bilibili + XHS for each configured keyword) → triage → import.
+
+    Designed for OS-level scheduling. Soft-fails on individual collector errors;
+    aborts before triage only if every collector failed. Returns a summary the
+    CLI uses to set its exit code.
+    """
+    from datetime import date, timedelta
+    from src.ingest.bilibili_collector import collect_bilibili
+    from src.ingest.xhs_collector import collect_xhs
+    from src.ingest.triage import triage_raw_jsonl
+
+    summary = PipelineSummary()
+    keywords = settings.COLLECT_KEYWORDS
+    if not keywords:
+        logger.error("Pipeline: no keywords configured ([collect].keywords is empty)")
+        summary.triage_failed = True
+        return summary
+
+    summary.keywords = len(keywords)
+    today = date.today()
+    yesterday = today - timedelta(days=1)
+    logger.info("Pipeline start: %d keyword(s) %s", len(keywords), list(keywords))
+
+    for kw in keywords:
+        try:
+            out = collect_bilibili(
+                kw,
+                time_start=yesterday.strftime("%Y-%m-%d"),
+                time_end=today.strftime("%Y-%m-%d"),
+            )
+            summary.raw_files.append(out)
+            logger.info("Pipeline bili: %r → %s", kw, out)
+        except Exception as exc:
+            summary.collect_failures.append(f"bili:{kw}: {exc}")
+            logger.warning("Pipeline bili: %r failed: %s", kw, exc)
+
+        try:
+            out = collect_xhs(kw)
+            summary.raw_files.append(out)
+            logger.info("Pipeline xhs:  %r → %s", kw, out)
+        except Exception as exc:
+            summary.collect_failures.append(f"xhs:{kw}: {exc}")
+            logger.warning("Pipeline xhs:  %r failed: %s", kw, exc)
+
+    if not summary.raw_files:
+        logger.error("Pipeline: all collectors failed, skipping triage and import")
+        summary.triage_failed = True
+        return summary
+
+    try:
+        summary.candidate_file = triage_raw_jsonl(summary.raw_files)
+        logger.info("Pipeline triage: %d raw file(s) → %s", len(summary.raw_files), summary.candidate_file)
+    except Exception as exc:
+        logger.error("Pipeline triage failed: %s", exc)
+        summary.triage_failed = True
+        return summary
+
+    summary.import_stats = import_candidate_jsonl(summary.candidate_file)
+    s = summary.import_stats
+    logger.info(
+        "Pipeline import: processed=%d succeeded=%d failed=%d duplicates=%d",
+        s.processed, s.succeeded, s.failed, s.duplicates,
+    )
+    if summary.collect_failures:
+        logger.warning(
+            "Pipeline finished with %d collector failure(s): %s",
+            len(summary.collect_failures), summary.collect_failures,
+        )
+    return summary
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────

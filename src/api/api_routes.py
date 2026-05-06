@@ -7,10 +7,12 @@ from src.db.crud import (
     count_published,
     count_recent,
     count_rumors,
+    get_rumor_by_slug,
     get_rumor_detail_by_slug,
     list_tags,
+    update_rumor,
 )
-from src.db.schemas import RumorDetailOut, StatsOut
+from src.db.schemas import RumorDetailOut, RumorReviewIn, RumorUpdate, StatsOut
 
 router = APIRouter(prefix="/api")
 
@@ -24,6 +26,24 @@ def api_rumor_detail(
     if rumor is None:
         raise HTTPException(status_code=404, detail="Rumor not found")
     return rumor
+
+
+@router.patch("/rumors/{slug}", response_model=RumorDetailOut)
+def api_rumor_review(
+    slug: str,
+    payload: RumorReviewIn,
+    db: Session = Depends(get_db_session),
+):
+    """Manual review endpoint: write status / truth_content / is_published."""
+    rumor = get_rumor_by_slug(db, slug)
+    if rumor is None:
+        raise HTTPException(status_code=404, detail="Rumor not found")
+
+    update = RumorUpdate(**payload.model_dump(exclude_unset=True))
+    update_rumor(db, rumor.id, update)
+
+    refreshed = get_rumor_detail_by_slug(db, slug)
+    return refreshed
 
 
 @router.get("/stats", response_model=StatsOut)

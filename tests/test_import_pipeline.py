@@ -246,3 +246,52 @@ def test_md_import_creates_rumor_and_analysis(tmp_path, db):
     analysis = get_analysis_by_rumor_id(db, rumor.id)
     assert analysis is not None
     assert analysis.summary == "Fake"
+
+
+# ─── dry-run vs real-run parity (codex review #2) ───────────────────────────
+
+def test_dry_run_slug_matches_real_run_when_collision(tmp_path, db):
+    """When a base slug already exists, dry-run preview must show the same hash-suffixed slug
+    that real run will produce."""
+    title = f"parity-test-{uuid4().hex[:8]}"
+    base_slug = slugify(title)
+
+    # First import seeds the base slug
+    first_path = write_jsonl(tmp_path, [{"title": title, "rumor_content": "first content"}])
+    stats_first = import_jsonl_file(first_path)
+    assert stats_first.succeeded == 1
+
+    # Second record: same title, different content → must get hash suffix
+    second_row = {"title": title, "rumor_content": "second different content"}
+    second_path = write_jsonl(tmp_path, [second_row], filename="second.jsonl")
+
+    # dry-run preview should already show the hash-suffixed slug
+    preview_buf = io.StringIO()
+    stats_dry = import_jsonl_file(second_path, dry_run=True, output=preview_buf)
+    assert stats_dry.succeeded == 1
+    preview = json.loads(preview_buf.getvalue().split(": ", 1)[1])
+    dry_slug = preview["rumor"]["slug"]
+    assert dry_slug.startswith(f"{base_slug}-"), f"expected hash suffix, got {dry_slug}"
+    assert dry_slug != base_slug
+
+    # Real run must produce the SAME slug as the dry-run preview
+    stats_real = import_jsonl_file(second_path)
+    assert stats_real.succeeded == 1
+    real_rumor = get_rumor_by_slug(db, dry_slug)
+    assert real_rumor is not None, f"real run did not produce slug={dry_slug}"
+
+
+def test_dry_run_detects_exact_duplicate_without_writing(tmp_path, db):
+    """dry-run should report a duplicate when the same content already exists, AND not write."""
+    title = f"dup-test-{uuid4().hex[:8]}"
+    row = {"title": title, "rumor_content": "exact duplicate content"}
+
+    # Seed
+    seed_path = write_jsonl(tmp_path, [row])
+    assert import_jsonl_file(seed_path).succeeded == 1
+
+    # dry-run with the exact same row → should be flagged as duplicate
+    dup_path = write_jsonl(tmp_path, [row], filename="dup.jsonl")
+    stats = import_jsonl_file(dup_path, dry_run=True)
+    assert stats.duplicates == 1
+    assert stats.succeeded == 0

@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 from uuid import UUID
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from src.db.models import RumorStatus
 
 
@@ -37,6 +37,23 @@ class RumorUpdate(BaseModel):
     media_files: list[MediaItem] | None = None
     source_urls: list[str] | None = None
     is_published: bool | None = None
+
+
+class RumorReviewIn(BaseModel):
+    """Narrow PATCH payload for the manual review workflow.
+
+    Only these three fields can be written by the review UI. PATCH semantics:
+    a field is updated only if explicitly present in the request body.
+    """
+    status: RumorStatus | None = None
+    truth_content: str | None = None
+    is_published: bool | None = None
+
+    @model_validator(mode="after")
+    def _at_least_one_field(self):
+        if not self.model_fields_set:
+            raise ValueError("Request body must include at least one of: status, truth_content, is_published")
+        return self
 
 
 class RumorDirectIn(BaseModel):

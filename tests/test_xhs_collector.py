@@ -1,8 +1,12 @@
 """Tests for Stage 1: xhs_collector parsing & URL utilities."""
 
+import json
+from datetime import datetime, timedelta
+
 import pytest
 
-from src.ingest.xhs_collector import build_note_url, parse_feed
+from src.ingest import xhs_collector
+from src.ingest.xhs_collector import _apply_local_filters, build_note_url, parse_feed
 
 
 class TestBuildNoteUrl:
@@ -91,3 +95,51 @@ class TestParseFeed:
         }
         row = parse_feed(feed, keyword="k", rank_offset=0)
         assert row["author"] == "备用名"
+
+
+class TestLocalSearchFilters:
+    @staticmethod
+    def _feed(created_at: datetime, comments: str, title: str) -> dict:
+        return {
+            "id": f"{int(created_at.timestamp()):08x}0000000012345678",
+            "noteCard": {
+                "displayTitle": title,
+                "interactInfo": {"commentCount": comments},
+            },
+        }
+
+    def test_publish_time_and_comment_sort_are_applied_locally(self):
+        now = datetime.now()
+        feeds = [
+            self._feed(now - timedelta(hours=2), "3", "recent-low"),
+            self._feed(now - timedelta(hours=3), "42", "recent-high"),
+            self._feed(now - timedelta(days=2), "999", "old-high"),
+        ]
+
+        rows = _apply_local_filters(
+            feeds,
+            {"publish_time": "一天内", "sort_by": "最多评论"},
+        )
+
+        assert [row["noteCard"]["displayTitle"] for row in rows] == [
+            "recent-high",
+            "recent-low",
+        ]
+
+    def test_search_does_not_send_publish_time_to_mcp(self, monkeypatch):
+        captured = {}
+
+        def fake_tool_call(url, headers, tool_name, arguments, **kwargs):
+            captured["arguments"] = arguments
+            return json.dumps({"feeds": []})
+
+        monkeypatch.setattr(xhs_collector, "_mcp_tool_call", fake_tool_call)
+
+        xhs_collector._search_feeds(
+            "http://127.0.0.1:18060/mcp",
+            {},
+            "雷军",
+            {"publish_time": "一天内", "sort_by": "最多评论"},
+        )
+
+        assert captured["arguments"]["filters"] == {"sort_by": "最多评论"}

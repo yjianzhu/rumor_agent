@@ -4,10 +4,9 @@ from hashlib import sha1
 from pathlib import Path
 from typing import Protocol
 
-from src.config import settings
 from src.db.models import RumorStatus
 from src.db.schemas import RumorCreate, _RumorSampleIn, StructuredRumorAnalysis
-from src.llm.client import AdkLlmClient
+from src.llm import client as llm_client
 
 logger = logging.getLogger(__name__)
 
@@ -40,23 +39,9 @@ def analyze_sample(
 ) -> StructuredRumorAnalysis:
     if client is not None:
         result = client.analyze(sample)
-        return normalize_structured_analysis(sample, result)
-
-    endpoints = settings.llm_endpoint_list
-    last_exc: Exception | None = None
-    for i, ep in enumerate(endpoints):
-        try:
-            c = AdkLlmClient(
-                model=model or ep.model,
-                api_key=ep.api_key,
-                api_base=ep.api_base,
-            )
-            result = c.analyze(sample)
-            return normalize_structured_analysis(sample, result)
-        except Exception as exc:
-            last_exc = exc
-            logger.warning("LLM endpoint %d (%s) failed: %s", i, ep.api_base, exc)
-    raise last_exc  # type: ignore[misc]
+    else:
+        result = llm_client.analyze_structured(sample, model=model)
+    return normalize_structured_analysis(sample, result)
 
 
 def analyze_markdown(

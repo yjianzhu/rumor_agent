@@ -1,18 +1,32 @@
+"""Unified LLM caller.
+
+Two public entry points:
+
+- ``chat(system, user)`` — free-text completion (used by triage).
+- ``analyze_structured(sample)`` — JSON-structured rumor analysis (used by analyzer).
+
+Both share endpoint fallback, per-endpoint tenacity retry, curl_cffi transport,
+and consistent error truncation in logs.
+"""
+
+from __future__ import annotations
+
 import json
 import logging
+import re
 
 from curl_cffi import requests as curl_requests
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
-from src.config import settings
-from src.db.schemas import _RumorSampleIn, StructuredRumorAnalysis
+from src.config import ApiEndpoint, settings
+from src.db.schemas import StructuredRumorAnalysis, _RumorSampleIn
 
 logger = logging.getLogger(__name__)
 
 _IMPERSONATE = "chrome136"
 _TIMEOUT = 120
 
-PROMPT = """You convert rumor samples into structured database-ready records.
+STRUCTURED_PROMPT = """You convert rumor samples into structured database-ready records.
 
 Rules:
 - Your job is limited to structuring the input text and producing text-internal analysis.
@@ -28,80 +42,126 @@ Rules:
 """
 
 
-class CurlLlmClient:
-    """OpenAI-compatible chat completion client backed by curl_cffi."""
+# ─── Public API ──────────────────────────────────────────────────────────────
 
-    def __init__(
-        self,
-        model: str | None = None,
-        temperature: float | None = None,
-        api_key: str | None = None,
-        api_base: str | None = None,
-    ):
-        self.model = model or settings.LLM_MODEL
-        self.temperature = settings.LLM_TEMPERATURE if temperature is None else temperature
-        self.api_key = api_key or settings.LLM_API_KEY
-        self.api_base = (api_base or settings.LLM_API_BASE or "").rstrip("/")
-
-    @retry(
-        stop=stop_after_attempt(settings.LLM_MAX_RETRIES),
-        wait=wait_exponential(multiplier=1, min=2, max=60),
-        retry=retry_if_exception_type((ConnectionError, TimeoutError)),
-        reraise=True,
+def chat(system: str, user: str, *, model: str | None = None) -> str:
+    """Free-text chat completion. Tries each configured endpoint in order."""
+    return _call_with_fallback(
+        lambda ep: _chat_one(ep, system, user, model=model),
+        op="chat",
     )
-    def analyze(self, sample: _RumorSampleIn) -> StructuredRumorAnalysis:
-        sample = self._truncate_input(sample)
-        schema_hint = json.dumps(
-            StructuredRumorAnalysis.model_json_schema(), ensure_ascii=False,
-        )
-        user_content = (
-            f"JSON Schema for your response:\n{schema_hint}\n\n"
-            f"Sample:\n{sample.model_dump_json()}"
-        )
-        raw = self._chat(PROMPT, user_content)
-        return StructuredRumorAnalysis.model_validate(self._parse_json(raw))
-
-    def _chat(self, system: str, user: str) -> str:
-        url = f"{self.api_base}/chat/completions"
-        headers: dict[str, str] = {"Content-Type": "application/json"}
-        if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
-
-        payload = {
-            "model": self.model,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            "temperature": self.temperature,
-        }
-        resp = curl_requests.post(
-            url, json=payload, headers=headers,
-            impersonate=_IMPERSONATE, timeout=_TIMEOUT,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        return data["choices"][0]["message"]["content"].strip()
-
-    @staticmethod
-    def _parse_json(text: str) -> dict:
-        cleaned = text.strip()
-        if cleaned.startswith("```"):
-            first_nl = cleaned.index("\n")
-            cleaned = cleaned[first_nl + 1:]
-            if cleaned.endswith("```"):
-                cleaned = cleaned[:-3]
-            cleaned = cleaned.strip()
-        return json.loads(cleaned)
-
-    def _truncate_input(self, sample: _RumorSampleIn) -> _RumorSampleIn:
-        text = sample.raw_text
-        max_chars = settings.LLM_MAX_INPUT_CHARS
-        if len(text) > max_chars:
-            logger.warning("Input truncated from %d to %d chars", len(text), max_chars)
-            return sample.model_copy(update={"raw_text": text[:max_chars]})
-        return sample
 
 
-# Backward-compatible alias
-AdkLlmClient = CurlLlmClient
+def analyze_structured(
+    sample: _RumorSampleIn,
+    *,
+    model: str | None = None,
+) -> StructuredRumorAnalysis:
+    """Run structured rumor analysis. Tries each configured endpoint in order."""
+    sample = _truncate_sample(sample)
+    schema_hint = json.dumps(StructuredRumorAnalysis.model_json_schema(), ensure_ascii=False)
+    user_content = (
+        f"JSON Schema for your response:\n{schema_hint}\n\n"
+        f"Sample:\n{sample.model_dump_json()}"
+    )
+
+    raw = _call_with_fallback(
+        lambda ep: _chat_one(ep, STRUCTURED_PROMPT, user_content, model=model),
+        op="analyze",
+    )
+    return StructuredRumorAnalysis.model_validate(_parse_json(raw))
+
+
+# ─── Endpoint fallback ───────────────────────────────────────────────────────
+
+def _call_with_fallback(call_one, *, op: str) -> str:
+    endpoints = settings.llm_endpoint_list
+    if not endpoints:
+        raise RuntimeError("No LLM endpoints configured")
+    last_exc: Exception | None = None
+    for i, ep in enumerate(endpoints):
+        try:
+            return call_one(ep)
+        except Exception as exc:
+            last_exc = exc
+            logger.warning(
+                "LLM endpoint %d (%s) failed during %s: %s",
+                i, ep.api_base, op, _truncate_exc(exc),
+            )
+    raise RuntimeError(
+        f"All {len(endpoints)} LLM endpoints failed for {op}. "
+        f"Last error: {_truncate_exc(last_exc)}"
+    ) from last_exc
+
+
+# ─── Single-endpoint chat with tenacity retry ────────────────────────────────
+
+@retry(
+    stop=stop_after_attempt(settings.LLM_MAX_RETRIES),
+    wait=wait_exponential(multiplier=1, min=2, max=60),
+    retry=retry_if_exception_type((ConnectionError, TimeoutError)),
+    reraise=True,
+)
+def _chat_one(
+    ep: ApiEndpoint,
+    system: str,
+    user: str,
+    *,
+    model: str | None = None,
+) -> str:
+    api_base = (ep.api_base or "").rstrip("/")
+    if not api_base:
+        raise RuntimeError("Endpoint missing api_base")
+    url = f"{api_base}/chat/completions"
+    headers: dict[str, str] = {"Content-Type": "application/json"}
+    if ep.api_key:
+        headers["Authorization"] = f"Bearer {ep.api_key}"
+
+    payload = {
+        "model": model or ep.model or settings.LLM_MODEL,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        "temperature": settings.LLM_TEMPERATURE,
+    }
+    resp = curl_requests.post(
+        url, json=payload, headers=headers,
+        impersonate=_IMPERSONATE, timeout=_TIMEOUT,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    return data["choices"][0]["message"]["content"].strip()
+
+
+# ─── Helpers ─────────────────────────────────────────────────────────────────
+
+_FENCE_RE = re.compile(r"^```\w*\n?|\n?```$")
+
+
+def _parse_json(text: str) -> dict:
+    cleaned = _FENCE_RE.sub("", text.strip()).strip()
+    return json.loads(cleaned)
+
+
+def _truncate_sample(sample: _RumorSampleIn) -> _RumorSampleIn:
+    text = sample.raw_text
+    max_chars = settings.LLM_MAX_INPUT_CHARS
+    if len(text) > max_chars:
+        logger.warning("Input truncated from %d to %d chars", len(text), max_chars)
+        return sample.model_copy(update={"raw_text": text[:max_chars]})
+    return sample
+
+
+def _truncate_exc(exc: Exception | None, limit: int = 300) -> str:
+    if exc is None:
+        return "(none)"
+    msg = str(exc)
+    lower = msg.lower()
+    if "<html" in lower or "<head" in lower:
+        m = re.search(r"<title>(.*?)</title>", msg, re.IGNORECASE | re.DOTALL)
+        hint = m.group(1).strip() if m else "HTML error page"
+        return f"{type(exc).__name__}: server returned HTML ({hint})"
+    if len(msg) > limit:
+        return f"{type(exc).__name__}: {msg[:limit]}…"
+    return f"{type(exc).__name__}: {msg}"

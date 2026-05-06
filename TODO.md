@@ -1,8 +1,8 @@
-# Rumor Agent - 项目开发 TODO
+# Rumor Agent — 项目 TODO
 
-> 更新时间：2026-04-06
+> 更新时间：2026-05-06
 >
-> **项目目标**：构建一个智能辟谣 Agent 系统，能够自动爬取网络谣言案例、存入数据库，并通过 LLM Agent 完成事实核查、分类与分析，最终输出结构化的辟谣结果。
+> **项目定位**：人工辅助辟谣平台。LLM 负责采集 + 归纳争议事件，真假裁决与辟谣文撰写由运营人员通过 Web 审核界面完成。
 
 ---
 
@@ -12,173 +12,112 @@
 |------|------|------|
 | Phase 0 | 基础设施 & 数据库 | ✅ 已完成 |
 | Phase 1 | 数据库接入层（CRUD） | ✅ 已完成 |
-| Phase 2 | 多平台采集（XHS + Bilibili） | ✅ 已完成（持续优化） |
-| Phase 3 | 主程序流程串联 | ✅ 已完成 |
-| Phase 4 | LLM 分析核心 | ✅ 基本完成（批量分析待实现） |
+| Phase 2 | 多平台采集（Bilibili / XHS） | ✅ 已完成（持续优化） |
+| Phase 3 | 采集 → triage → 入库主流水线 | ✅ 已完成 |
+| Phase 4 | LLM 客户端 & 结构化输出 | ✅ 已完成（统一 caller） |
+| Phase 5 | Web 审核界面 + 框架硬故障修复 | ✅ 已完成（2026-05-05） |
+| Phase 6 | 自动化流水线（OS 级调度） | ✅ 已完成（2026-05-06） |
+
+**测试覆盖**：93 用例全绿（含端到端 e2e 与 pipeline orchestration）
 
 ---
 
 ## Phase 0：基础设施 & 数据库 ✅
 
-- [x] 初始化 Python 项目结构（`src/`, `scripts/`）
-- [x] 配置 `.env` 环境变量（`DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT`, `DB_NAME`）
-- [x] 实现 `src/config.py` — 读取配置，生成 `DATABASE_URL`
-- [x] 实现 `src/db/base.py` — SQLAlchemy Engine、Session、`get_db()` 依赖
-- [x] 实现 `src/db/models.py` — `Rumor` 表 & `AnalysisResult` 表 ORM 模型
-- [x] 实现 `init_db.py` — 启用 `uuid-ossp` 扩展，`create_all()` 建表
-- [x] 验证数据库连接（`scripts/check_database.py`）
+- [x] `src/config.py` 从 `config.toml` 加载配置（替代 `.env`）
+- [x] SQLAlchemy 2.0 `DeclarativeBase`、Engine、Session
+- [x] `init_db.py` 走 drop & recreate 流程，不再嵌迁移 DDL
+- [x] `pgvector` + `uuid-ossp` 扩展的依赖关系明确（superuser 装一次）
 
----
+## Phase 1：数据库接入层 ✅
 
-## Phase 1：数据库接入层（CRUD Repository）✅
+- [x] `crud.py` 完整 CRUD + 语义去重（pgvector cosine_distance）
+- [x] schemas：`RumorCreate / RumorUpdate / RumorReviewIn / StructuredRumorAnalysis`
+- [x] `_resolve_slug` 两层去重：slug/hash + embedding 相似
 
-> **目标**：封装对数据库的增删改查操作，供爬虫模块和主程序调用，避免业务逻辑直接操作 Session。
+## Phase 2：多平台采集 ✅
 
-### 1.1 `src/db/crud.py`
-- [x] `create_rumor(db, data: RumorCreate) -> Rumor` — slug 唯一性校验
-- [x] `get_rumor_by_slug(db, slug: str) -> Rumor | None`
-- [x] `get_rumor_by_id(db, rumor_id: UUID) -> Rumor | None`
-- [x] `list_rumors(db, status, tag, is_published, offset, limit)` — 支持状态/标签/发布过滤 + 分页
-- [x] `count_rumors(db) -> int`
-- [x] `update_rumor(db, rumor_id, data: RumorUpdate)` — 任意字段更新
-- [x] `delete_rumor(db, rumor_id: UUID) -> bool`
-- [x] `create_analysis_result(db, data: AnalysisResultCreate) -> AnalysisResult`
-- [x] `get_analysis_by_rumor_id(db, rumor_id: UUID) -> AnalysisResult | None`
+- [x] `bilibili_collector.py`：search API + min_play 过滤
+- [x] `xhs_collector.py`：MCP login → search → detail
+- [x] CLI `--collect-bili / --collect-xhs`（支持 `[collect].keywords` 批量）
 
-### 1.2 `src/db/schemas.py`
-- [x] `RumorCreate` / `RumorUpdate` / `RumorOut` — 谣言增改查 Schema
-- [x] `RumorDirectIn` — JSONL 直接导入 Schema（含可选 analysis 字段）
-- [x] `_RumorSampleIn` — 内部 MD → LLM 输入包装
-- [x] `StructuredRumorAnalysis` — LLM 结构化输出 Schema
-- [x] `AnalysisResultCreate` / `AnalysisResultOut`
+### 2.x 持续优化（backlog）
+- [ ] B 站正文/评论二次抓取（当前 description 几乎全为 `-`，triage 输入质量受限）
+- [ ] raw 清洗（空标题、重复 bvid/note_id）
+- [ ] 主题相关性粗筛（降噪声）
+- [ ] 采集质量指标（空内容率、可研判率、留存率）
 
-### 1.3 测试
-- [x] `tests/test_import_pipeline.py` — 13 个测试覆盖 JSONL/MD 导入 + DB 集成
+## Phase 3：主流水线 ✅
 
----
-
-## Phase 2：多平台采集（XHS + Bilibili）✅
-
-> **目标**：从社媒平台采集候选内容（当前已接入 Bilibili / 小红书），产出统一 raw JSONL 供后续 triage/fusion/import 使用。
-
-### 2.1 已完成能力
-- [x] Bilibili 采集器：`src/ingest/bilibili_collector.py`
-  - 关键词检索、排序、分页、日期范围（CLI 默认“昨天到今天”）
-  - 输出 `data/staging/raw/bili_*.jsonl`
-- [x] 小红书采集器：`src/ingest/xhs_collector.py`
-  - MCP 登录检查、搜索、详情补全（description）
-  - 支持 `sort_by / publish_time / note_type` 过滤
-  - 输出 `data/staging/raw/xhs_*.jsonl`
-- [x] Stage 1 CLI 接入：`src/main.py`
-  - `--collect-bili KEYWORD`
-  - `--collect-xhs KEYWORD`
-- [x] 测试覆盖
-  - `tests/test_bili_collector.py`
-  - `tests/test_xhs_collector.py`
-- [ ] 添加评论获取功能，可能正文和视频描述都没有关键信息，从评论区可以获取TODO
-
-### 2.2 现状约定（raw 文件）
-- [x] `raw` 每行不再重复写 `platform` / `fetched_at`
-- [x] 平台与时间由文件名表达（如 `bili_20260406_222916.jsonl`）
-- [x] 规则文档：`docs/collector_search_defaults.md`
-
-### 2.3 下一步优化（Phase 2 持续项）
-- [ ] 去重与清洗增强（空标题/空作者/重复 note_id、bvid）
-- [ ] 主题相关性粗筛（降低低相关噪声）
-- [ ] 采集质量指标（空内容率、可研判率、去重后留存率）
-- [ ] 增加更多平台适配器（在 `src/ingest/` 扩展）
-
----
-
-## Phase 3：主程序流程串联 ✅
-
-> **目标**：整合分析流水线与数据库接入层，提供统一的命令行入口。
-
-### 3.1 `src/main.py` CLI
-- [x] `--import-jsonl FILE` — JSONL 直接导入（无需 LLM）
-- [x] `--import-md FILE` — Markdown 经 LLM 分析后导入
-- [x] `--limit N` — 限制处理条数
-- [x] `--dry-run` — 预览模式，不写库
-- [x] `--model MODEL` — 覆盖默认 LLM 模型
-- [x] Slug 去重（base slug + hash suffix 回退）
-- [x] 事务安全（失败时 `cleanup_rumor_bundle` 回滚）
+- [x] CLI 入口：`--collect-bili / --collect-xhs / --triage-jsonl / --import-candidate-jsonl`
+- [x] 旁路：`--import-jsonl`（结构化）、`--import-md`（历史人工辟谣回填）
+- [x] `--dry-run` 跟真实导入走同一 `_resolve_slug`（仅跳过 embedding API）
+- [x] 删除已废弃的 `--fuse-jsonl / --import-fused-jsonl` 路径
+- [x] 事务安全（savepoint + 批量 commit）
 - [x] 导入统计（processed / succeeded / failed / duplicates）
 
-### 3.2 配置管理 `src/config.py`
-- [x] `LLM_API_KEY` / `LLM_API_BASE` — LLM 凭据（通用，不锁定 OpenAI）
-- [x] `LLM_MODEL` — 默认 `openai/gpt-4o-mini`
-- [x] `LLM_TEMPERATURE` — 默认 0.0
-- [ ] 爬虫相关配置（`CRAWL_DELAY`, `MAX_RETRIES`）— 待 Phase 2
+## Phase 4：LLM 客户端 ✅
 
-### 3.3 日志系统 `src/logger.py`
-- [x] Console + 文件日志（`logs/rumor_agent.log`）
-- [x] 格式：`[TIMESTAMP] [LEVEL] module: message`
+- [x] `src/llm/client.py` 统一两个入口：
+  - `chat(system, user)` — 自由文本 chat（triage 用）
+  - `analyze_structured(sample)` — 结构化输出（MD/analyzer 用）
+- [x] 多 endpoint fallback + tenacity 重试 + curl_cffi（绕 WAF TLS 指纹）
+- [x] Prompt 边界明确：不声称外部检索、evidence 仅引用输入文本、缺判定信号强制 DUBIOUS
+- [x] `LLM_MAX_INPUT_CHARS` 字符级截断（避免上下文溢出）
+- [x] `analyzer.has_explicit_verdict_signal` 中英文关键词校验
 
-### 3.4 端到端测试
-- [x] 13 个测试全部通过（JSONL 单元 + MD 单元 + DB 集成）
-- [ ] 真实 LLM 端到端测试（需 API Key）
+## Phase 5：Web 审核界面 + 框架修复 ✅（2026-05-05）
 
----
+### 5.1 审核闭环
+- [x] `RumorReviewIn` 窄 schema：`status / truth_content / is_published`，空 body 422
+- [x] `PATCH /api/rumors/{slug}` JSON 接口
+- [x] `POST /partials/rumors/{slug}/review` form-urlencoded 接口（htmx 局部刷新）
+- [x] `detail.html` 拆出 `partials/rumor_detail.html` 含审核表单
+- [x] 列表 view 切换：`pending` (`is_published=false`) / `published` / `all`，默认 pending
 
-## Phase 4：LLM 分析核心 ✅（批量分析待实现）
+### 5.2 框架硬故障修复
+- [x] `media.save_image` 双 basename 归一化（`Path(slug).name` + `Path(filename).name`），防路径逃逸
+- [x] htmx 加载更多改真追加（按钮 `hx-target="this" hx-swap="outerHTML"`），删 stale `hx-select`
+- [x] Starlette 1.0 `TemplateResponse` 签名升级（4 处）
+- [x] 端到端测试 `tests/test_e2e_flow.py`：合成 raw → mock LLM triage → 入库 → 列表 → 详情 → 表单审核 → API 反向 toggle
 
-> **目标**：基于 LLM 对谣言进行结构化提取、真假分类、可信度评分。
+## Phase 6：自动化流水线 ✅（2026-05-06）
 
-### 4.1 LLM 客户端 `src/llm/client.py`
-- [x] `AdkLlmClient` — Google ADK + LiteLLM 封装
-- [x] 支持多模型（OpenAI / Gemini 等，通过 LiteLLM 路由）
-- [x] 结构化输出：`_RumorSampleIn` → `StructuredRumorAnalysis`
-- [x] Prompt 内嵌于 client.py（规则：不声称外部核查、evidence 仅引用输入文本）
-
-### 4.2 分析器 `src/analyzer/analyzer.py`
-- [x] `analyze_sample(sample)` — LLM 分析入口
-- [x] `analyze_markdown(path)` — 读取 MD 文件并分析
-- [x] `normalize_structured_analysis()` — 后处理（去重 tags、合并 URLs、verdict signal 校验）
-- [x] `has_explicit_verdict_signal()` — 中英文关键词匹配，无信号强制 DUBIOUS
-- [x] `slugify()` / `hash_suffix()` / `to_rumor_create()` 等工具函数
-
-### 4.3 批量分析
-- [ ] 支持 `--analyze` 参数对未分析记录批量处理
-
----
-
-## 目录结构（当前实际）
-
-```
-rumor_agent/
-├── .env                        # 环境变量（不入 Git）
-├── init_db.py                  # 数据库初始化脚本
-├── requirements.txt            # 项目依赖
-├── conftest.py                 # pytest 根配置
-├── TODO.md / README.md / AGENTS.md
-├── logs/                       # 日志输出目录
-├── examples/
-│   └── 小米景明汽车谣言.md     # 示例谣言 MD
-├── scripts/
-│   ├── check_database.py       # 数据库连接验证
-│   ├── make_jsonl.py           # MD → JSONL 转换
-│   └── verify_import.py        # 导入验证
-├── tests/
-│   └── test_import_pipeline.py # 导入流水线测试（13 个）
-└── src/
-    ├── config.py               # 配置管理 ✅
-    ├── logger.py               # 日志系统 ✅
-    ├── main.py                 # CLI 入口 ✅
-    ├── db/
-    │   ├── base.py             # SQLAlchemy 基础 ✅
-    │   ├── models.py           # ORM 模型 ✅
-    │   ├── schemas.py          # Pydantic Schema ✅
-    │   └── crud.py             # CRUD 操作层 ✅
-    ├── analyzer/
-    │   └── analyzer.py         # 分析器 + 后处理 ✅
-    └── llm/
-        └── client.py           # ADK + LiteLLM 客户端 ✅
-```
+- [x] CLI `--run-pipeline`：遍历 `[collect].keywords` 跑 `collect-bili + collect-xhs`，汇总 raw → `triage` → `import-candidate`
+- [x] 失败策略：单个 keyword 单个平台失败仅记 warning 不阻塞；全部 collect 失败时跳过 triage/import；triage 失败时不调用 import
+- [x] `PipelineSummary` 提供 `failed` 属性，CLI 据此设置退出码（0/1）
+- [x] 测试覆盖：happy path、XHS 失败不阻塞 Bili、全部 collect 失败、triage 失败、空 keywords
+- [x] README 给出 Linux crontab 与 Windows Task Scheduler 样例
 
 ---
 
 ## 当前下一步行动
 
-1. **采集质量优化**：完善 raw 清洗、去重、相关性评分
-2. **批量分析**：实现 `--analyze` 参数对已入库但未分析的记录进行批量 LLM 处理
-3. **小改进**：`src/db/base.py` 中 `declarative_base()` 迁移到 SQLAlchemy 2.0 `DeclarativeBase`
+按优先级：
+
+1. **真实 LLM 端到端跑通**
+   - 配置 `[llm.endpoints]` 与 `[embedding.endpoints]`，跑一次 `--run-pipeline` 看产出质量
+   - 记录 triage prompt 在真实数据上的表现，迭代提示词
+2. **B 站正文/评论补抓**
+   - 现在 raw 里 description 基本空，triage 实际看不到正文
+   - 需要 collector 二次拉评论 / AI 字幕，写回 raw 的 `description`
+3. **批量分析 CLI**
+   - `--analyze` 命令对已入库但无 `analysis_results` 的 rumor 批量调 `analyze_structured`
+   - 限于 MD 风格的回填路径；triage 路径不需要二次 LLM 分析
+4. **采集质量监控**
+   - 加 `--collect-stats` 输出空内容率、去重前后留存率
+5. **审核 UI 优化**（视使用情况决定）
+   - 详情页加上一条 / 下一条快捷键
+   - 列表页未审核计数显示在 tab 上
+   - 可选：批量审核操作（多选 → 统一发布）
+6. **流水线监控**（可选）
+   - `--run-pipeline` 失败时通过 webhook 推 Slack / 飞书
+   - 加 `--health-check` 子命令快速验证 DB / LLM / 嵌入 endpoints / XHS MCP 是否就绪
+
+---
+
+## 不在 roadmap 内（已确认的边界）
+
+- **不引入 Alembic**：当前阶段数据量小，schema 变更走 drop & recreate
+- **LLM 不做真假判定**：FAKE/TRUE/OUTDATED 状态只能由人工通过审核界面写入
+- **不做事实核查 Agent**：项目定位是人工辅助平台，不计划接外部检索 / 跨源验证

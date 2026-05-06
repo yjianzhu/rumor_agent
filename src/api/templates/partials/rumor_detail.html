@@ -1,0 +1,138 @@
+{% set status_colors = {
+  'FAKE': 'bg-rose-50 text-rose-600',
+  'TRUE': 'bg-emerald-50 text-emerald-600',
+  'DUBIOUS': 'bg-amber-50 text-amber-600',
+  'OUTDATED': 'bg-slate-100 text-slate-500'
+} %}
+
+<article id="rumor-article" class="bg-white rounded-2xl border border-slate-200/60 p-8 shadow-sm space-y-6">
+  <!-- Header -->
+  <div>
+    <div class="flex items-center gap-3 mb-2">
+      <span class="px-2.5 py-0.5 rounded-full text-xs font-medium {{ status_colors.get(rumor.status.value, 'bg-slate-100 text-slate-500') }}">
+        {{ rumor.status.value }}
+      </span>
+      {% if rumor.is_published %}
+      <span class="text-xs text-emerald-600 font-medium">已发布</span>
+      {% else %}
+      <span class="text-xs text-slate-400 font-medium">未发布</span>
+      {% endif %}
+    </div>
+    <h1 class="text-2xl font-semibold tracking-tight text-slate-800">{{ rumor.title }}</h1>
+    <p class="text-sm text-slate-400 mt-1">
+      {{ rumor.created_at.strftime('%Y-%m-%d %H:%M') }}
+      · 浏览 {{ rumor.view_count }} 次
+      {% if rumor.updated_at and rumor.updated_at != rumor.created_at %}
+      · 更新于 {{ rumor.updated_at.strftime('%Y-%m-%d %H:%M') }}
+      {% endif %}
+    </p>
+  </div>
+
+  <!-- Media -->
+  {% if rumor.media_files %}
+  <div>
+    <h2 class="text-xs font-medium uppercase tracking-widest text-slate-400 mb-2">相关媒体</h2>
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      {% for item in rumor.media_files %}
+      {% if item.type == 'image' %}
+      <figure>
+        <img src="/media/{{ item.path }}" alt="{{ item.caption }}" class="w-full rounded-xl border border-slate-200/60">
+        {% if item.caption %}
+        <figcaption class="text-xs text-slate-400 mt-1.5">{{ item.caption }}</figcaption>
+        {% endif %}
+      </figure>
+      {% endif %}
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Summary -->
+  {% if rumor.summary %}
+  <div>
+    <h2 class="text-xs font-medium uppercase tracking-widest text-slate-400 mb-1">摘要</h2>
+    <p class="text-slate-700 leading-relaxed">{{ rumor.summary }}</p>
+  </div>
+  {% endif %}
+
+  <!-- Rumor content -->
+  {% if rumor.rumor_content %}
+  <div class="bg-rose-50/60 border-l-4 border-rose-300 p-4 rounded-lg">
+    <h2 class="text-xs font-medium uppercase tracking-widest text-rose-600 mb-2">谣言内容</h2>
+    <p class="text-slate-800 leading-relaxed whitespace-pre-wrap">{{ rumor.rumor_content }}</p>
+  </div>
+  {% endif %}
+
+  <!-- Truth content -->
+  {% if rumor.truth_content %}
+  <div class="bg-emerald-50/60 border-l-4 border-emerald-300 p-4 rounded-lg">
+    <h2 class="text-xs font-medium uppercase tracking-widest text-emerald-600 mb-2">真相</h2>
+    <p class="text-slate-800 leading-relaxed whitespace-pre-wrap">{{ rumor.truth_content }}</p>
+  </div>
+  {% endif %}
+
+  <!-- Source URLs -->
+  {% if rumor.source_urls %}
+  <div>
+    <h2 class="text-xs font-medium uppercase tracking-widest text-slate-400 mb-2">来源</h2>
+    <ul class="space-y-1">
+      {% for url in rumor.source_urls %}
+      <li>
+        <a href="{{ url }}" target="_blank" rel="noopener" class="text-sm text-indigo-600 hover:text-indigo-500 underline underline-offset-2 transition-colors duration-150 break-all">{{ url }}</a>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  <!-- Tags -->
+  {% if rumor.tags %}
+  <div class="flex flex-wrap gap-2">
+    {% for t in rumor.tags %}
+    <span class="inline-block bg-slate-100/80 text-slate-500 text-xs px-2 py-1 rounded-md">#{{ t }}</span>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <!-- Review form -->
+  <form
+    class="border-t border-slate-200/60 pt-6 space-y-4"
+    hx-post="/partials/rumors/{{ rumor.slug }}/review"
+    hx-target="#rumor-article"
+    hx-swap="outerHTML"
+  >
+    <h2 class="text-xs font-medium uppercase tracking-widest text-slate-400">人工审核</h2>
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <label class="text-sm text-slate-600">
+        <span class="block mb-1 text-xs text-slate-500">状态</span>
+        <select name="status" class="w-full rounded-lg bg-slate-50/50 border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-300">
+          {% for s in ['FAKE', 'TRUE', 'DUBIOUS', 'OUTDATED'] %}
+          <option value="{{ s }}" {% if rumor.status.value == s %}selected{% endif %}>{{ s }}</option>
+          {% endfor %}
+        </select>
+      </label>
+
+      <label class="text-sm text-slate-600 md:col-span-2 flex items-end gap-3">
+        <span class="flex items-center gap-2">
+          <input type="checkbox" name="is_published" value="1" {% if rumor.is_published %}checked{% endif %} class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500/30">
+          <span>发布</span>
+        </span>
+      </label>
+    </div>
+
+    <label class="block text-sm text-slate-600">
+      <span class="block mb-1 text-xs text-slate-500">真相 / 辟谣文</span>
+      <textarea name="truth_content" rows="4"
+        class="w-full rounded-lg bg-slate-50/50 border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-300 leading-relaxed"
+        placeholder="人工核查后的真相说明...">{{ rumor.truth_content or '' }}</textarea>
+    </label>
+
+    <div class="flex items-center gap-3">
+      <button type="submit" class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-500 transition-colors duration-150">
+        保存审核
+      </button>
+      <span class="htmx-indicator text-sm text-slate-400">保存中...</span>
+    </div>
+  </form>
+</article>

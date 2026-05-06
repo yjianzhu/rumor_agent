@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 
-from src.api.deps import get_db_session, TEMPLATES_DIR
+from src.api.deps import get_db_session, TEMPLATES_DIR, resolve_view
 from src.db.crud import (
     count_by_status,
     count_published,
@@ -38,28 +38,30 @@ def index(
     q: str = "",
     status: str = "",
     tag: str = "",
+    view: str = "pending",
     db: Session = Depends(get_db_session),
 ):
     status_enum = RumorStatus(status) if status else None
+    canonical_view, is_published = resolve_view(view)
+
     rumors = list_rumors(
         db,
         status=status_enum,
         tag=tag or None,
         q=q or None,
+        is_published=is_published,
         limit=DEFAULT_LIMIT,
+        include_analysis=True,
     )
-    # eagerly load analysis for card display
-    for r in rumors:
-        _ = r.analysis
 
     total = count_rumors_filtered(
         db, status=status_enum, tag=tag or None, q=q or None,
+        is_published=is_published,
     )
     all_tags = list_tags(db)
     stats = _build_stats(db)
 
-    return templates.TemplateResponse("index.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "index.html", {
         "rumors": rumors,
         "total": total,
         "has_more": total > DEFAULT_LIMIT,
@@ -68,6 +70,7 @@ def index(
         "q": q,
         "status": status,
         "tag": tag,
+        "view": canonical_view,
         "tags": all_tags,
         "stats": stats,
     })
@@ -83,8 +86,7 @@ def detail(
     if rumor is None:
         return HTMLResponse("<h1>404 — 未找到</h1>", status_code=404)
 
-    return templates.TemplateResponse("detail.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "detail.html", {
         "rumor": rumor,
         "analysis": rumor.analysis,
     })

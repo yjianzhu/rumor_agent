@@ -11,7 +11,7 @@ import json
 import logging
 import random
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -110,8 +110,9 @@ def _search_feeds(
     filters: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     arguments: dict[str, Any] = {"keyword": keyword}
-    if filters:
-        arguments["filters"] = filters
+    mcp_filters = {k: v for k, v in (filters or {}).items() if k != "publish_time"}
+    if mcp_filters:
+        arguments["filters"] = mcp_filters
     text = _mcp_tool_call(
         url, headers, "search_feeds", arguments,
         request_id="search", timeout=60,
@@ -121,7 +122,56 @@ def _search_feeds(
     except json.JSONDecodeError:
         logger.warning("search_feeds returned non-JSON: %s", text[:200])
         return []
-    return payload.get("feeds", [])
+    return _apply_local_filters(payload.get("feeds", []), filters)
+
+
+def _apply_local_filters(
+    feeds: list[dict[str, Any]],
+    filters: dict[str, str] | None,
+) -> list[dict[str, Any]]:
+    if not filters:
+        return feeds
+
+    publish_time = filters.get("publish_time")
+    if publish_time and publish_time != "不限":
+        threshold = _publish_time_threshold(publish_time)
+        if threshold is not None:
+            feeds = [feed for feed in feeds if (ts := _note_created_at(feed)) and ts >= threshold]
+
+    sort_by = filters.get("sort_by")
+    if sort_by == "最新":
+        feeds = sorted(feeds, key=lambda feed: _note_created_at(feed) or datetime.min, reverse=True)
+    elif sort_by in {"最多点赞", "最多评论", "最多收藏"}:
+        key_map = {
+            "最多点赞": "likedCount",
+            "最多评论": "commentCount",
+            "最多收藏": "collectedCount",
+        }
+        feeds = sorted(feeds, key=lambda feed: _count_metric(feed, key_map[sort_by]), reverse=True)
+
+    return feeds
+
+
+def _publish_time_threshold(publish_time: str) -> datetime | None:
+    days = {"一天内": 1, "一周内": 7, "半年内": 183}.get(publish_time)
+    return datetime.now() - timedelta(days=days) if days is not None else None
+
+
+def _note_created_at(feed: dict[str, Any]) -> datetime | None:
+    note_id = str(feed.get("id", ""))
+    try:
+        return datetime.fromtimestamp(int(note_id[:8], 16))
+    except (OSError, OverflowError, ValueError):
+        return None
+
+
+def _count_metric(feed: dict[str, Any], key: str) -> int:
+    value = feed.get("noteCard", {}).get("interactInfo", {}).get(key, 0)
+    text = str(value or 0).replace(",", "").strip()
+    try:
+        return int(float(text[:-1]) * 10000) if text.endswith("万") else int(text)
+    except ValueError:
+        return 0
 
 
 def _fetch_detail(
@@ -240,8 +290,12 @@ def collect_xhs(
     _check_login(mcp_url, headers)
 
     feeds = _search_feeds(mcp_url, headers, keyword, filters)
+    returned_count = len(feeds)
     feeds = feeds[:items_limit]
-    logger.info("search_feeds returned %d items (capped to %d)", len(feeds), items_limit)
+    logger.info(
+        "search_feeds returned %d items (using %d, cap %d)",
+        returned_count, len(feeds), items_limit,
+    )
 
     rows: list[dict[str, Any]] = []
 

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import re
 import shutil
 from pathlib import Path
@@ -49,27 +48,3 @@ def extract_md_images(md_path: Path) -> list[MediaItem]:
         items.append(MediaItem(type="image", path=rel_posix, caption=caption))
 
     return items
-
-
-def read_fused_json_record(raw_line: str) -> tuple[_RumorSampleIn, str]:
-    """Parse one fused JSONL line and build a rumor sample plus raw_text."""
-    record = json.loads(raw_line)
-    if not isinstance(record, dict):
-        raise ValueError("Fused JSONL line must be an object")
-
-    title = record.get("title", "")
-    description = record.get("description", "")
-    source_urls = record.get("source_urls", [])
-    keyword = record.get("keyword", "")
-
-    raw_text = f"标题: {title}\n描述: {description}"
-    if source_urls:
-        raw_text += "\n来源: " + ", ".join(source_urls)
-
-    sample = _RumorSampleIn(
-        raw_text=raw_text,
-        title=title,
-        source_urls=source_urls,
-        tags=[keyword] if keyword else None,
-    )
-    return sample, raw_text

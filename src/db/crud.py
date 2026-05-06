@@ -77,11 +77,14 @@ def list_rumors(
     is_published: bool | None = None,
     offset: int = 0,
     limit: int = 20,
+    include_analysis: bool = False,
 ) -> list[Rumor]:
     """List rumors with optional filtering, search, and pagination."""
     stmt = _apply_rumor_filters(
         select(Rumor), status=status, tag=tag, q=q, is_published=is_published,
     )
+    if include_analysis:
+        stmt = stmt.options(joinedload(Rumor.analysis))
     stmt = stmt.order_by(Rumor.created_at.desc()).offset(offset).limit(limit)
     return list(db.execute(stmt).scalars().all())
 

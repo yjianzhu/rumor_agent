@@ -19,114 +19,67 @@ from tests.conftest import write_jsonl
 # ─── 1. tenacity retry ─────────────────────────────────────────────────────
 
 class TestLlmRetry:
-    def _make_client(self):
-        """Create an AdkLlmClient with mocked ADK internals."""
-        from src.llm.client import AdkLlmClient
-
-        with patch.object(AdkLlmClient, "__init__", lambda self: None):
-            client = AdkLlmClient()
-        client.model = settings.LLM_MODEL
-        client.temperature = settings.LLM_TEMPERATURE
-        client._app_name = "test"
-        client._user_id = "test"
-        client._output_key = "structured_result"
-        return client
-
-    def _setup_runner(self, client, side_effects):
-        """Configure mock session/runner to produce given side effects in sequence."""
-        call_count = 0
-
-        mock_session = MagicMock()
-        mock_session.id = "s1"
-        client._session_service = MagicMock()
-        client._session_service.create_session_sync.return_value = mock_session
-
-        from google.genai import types
-        client._types = types
-
-        def fake_run(**kw):
-            nonlocal call_count
-            effect = side_effects[min(call_count, len(side_effects) - 1)]
-            call_count += 1
-            if isinstance(effect, Exception):
-                raise effect
-            # return an event with text
-            event = MagicMock()
-            event.content.parts = [MagicMock(text=effect)]
-            return iter([event])
-
-        client._runner = MagicMock()
-        client._runner.run.side_effect = fake_run
-
-        stored = MagicMock()
-        stored.state = {}
-        client._session_service.get_session_sync.return_value = stored
-
-        return lambda: call_count
+    def _make_response(self, text: str) -> MagicMock:
+        resp = MagicMock()
+        resp.json.return_value = {"choices": [{"message": {"content": text}}]}
+        resp.raise_for_status.return_value = None
+        return resp
 
     def test_retry_succeeds_on_second_attempt(self):
-        client = self._make_client()
+        from src.llm import client as llm_client
+
         expected_json = StructuredRumorAnalysis(
             title="T", summary=None, rumor_content="c", truth_content=None,
             status=RumorStatus.DUBIOUS, tags=None, source_urls=None,
             analysis_summary=None, truthfulness_score=0.5, evidence="e",
         ).model_dump_json()
 
-        get_count = self._setup_runner(client, [
+        side_effects = [
             ConnectionError("transient"),
-            expected_json,
-        ])
+            self._make_response(expected_json),
+        ]
+        with patch.object(llm_client.curl_requests, "post", side_effect=side_effects) as mock_post:
+            result = llm_client.analyze_structured(_RumorSampleIn(raw_text="test content"))
 
-        sample = _RumorSampleIn(raw_text="test content")
-        result = client.analyze(sample)
-
-        assert get_count() == 2
+        assert mock_post.call_count == 2
         assert result.title == "T"
 
     def test_retry_exhausted_raises(self):
-        client = self._make_client()
-        self._setup_runner(client, [ConnectionError("persistent failure")])
+        from src.llm import client as llm_client
 
-        sample = _RumorSampleIn(raw_text="test content")
-        with pytest.raises(ConnectionError, match="persistent failure"):
-            client.analyze(sample)
+        # All attempts fail with a retriable error → tenacity exhausts retries on
+        # the first endpoint, fallback tries the next endpoint (also fails),
+        # final RuntimeError is raised by _call_with_fallback.
+        with patch.object(
+            llm_client.curl_requests, "post",
+            side_effect=ConnectionError("persistent failure"),
+        ):
+            with pytest.raises(RuntimeError, match="endpoints failed"):
+                llm_client.analyze_structured(_RumorSampleIn(raw_text="test content"))
 
 
 # ─── 2. Context length truncation ──────────────────────────────────────────
 
 class TestContextTruncation:
     def test_char_fallback_truncation(self, caplog):
-        from src.llm.client import AdkLlmClient
+        from src.llm.client import _truncate_sample
 
-        def patched_init(self, *a, **kw):
-            self.model = settings.LLM_MODEL
-            self.temperature = settings.LLM_TEMPERATURE
+        long_text = "x" * (settings.LLM_MAX_INPUT_CHARS + 1000)
+        sample = _RumorSampleIn(raw_text=long_text)
 
-        with patch.object(AdkLlmClient, "__init__", patched_init):
-            client = AdkLlmClient()
-            long_text = "x" * (settings.LLM_MAX_INPUT_CHARS + 1000)
-            sample = _RumorSampleIn(raw_text=long_text)
+        with caplog.at_level(logging.WARNING):
+            result = _truncate_sample(sample)
 
-            with caplog.at_level(logging.WARNING):
-                result = client._truncate_input(sample)
-
-            assert len(result.raw_text) == settings.LLM_MAX_INPUT_CHARS
-            assert "truncated" in caplog.text
+        assert len(result.raw_text) == settings.LLM_MAX_INPUT_CHARS
+        assert "truncated" in caplog.text
 
     def test_short_text_not_truncated(self):
-        from src.llm.client import AdkLlmClient
+        from src.llm.client import _truncate_sample
 
-        def patched_init(self, *a, **kw):
-            self.model = settings.LLM_MODEL
-            self.temperature = settings.LLM_TEMPERATURE
+        sample = _RumorSampleIn(raw_text="short text")
+        result = _truncate_sample(sample)
 
-        with patch.object(AdkLlmClient, "__init__", patched_init):
-            client = AdkLlmClient()
-            sample = _RumorSampleIn(raw_text="short text")
-
-            result = client._truncate_input(sample)
-
-            assert result.raw_text == "short text"
+        assert result.raw_text == "short text"
 
 
 # ─── 3. Batch commit ───────────────────────────────────────────────────────

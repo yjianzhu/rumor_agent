@@ -12,7 +12,6 @@ class ApiEndpoint:
     api_key: str | None = None
     api_base: str | None = None
     model: str | None = None
-    api_style: str = "chat"  # "chat" = /chat/completions, "responses" = /responses
 
 
 @dataclass

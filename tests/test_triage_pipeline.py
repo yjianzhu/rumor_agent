@@ -104,6 +104,44 @@ class TestParseEvents:
         with pytest.raises(ValueError, match="JSON array"):
             _parse_events('{"title": "not an array"}')
 
+    def test_url_whitelist_strips_hallucinated_urls(self):
+        raw = json.dumps([{
+            "title": "保留事件",
+            "content": "ok",
+            "source_urls": [
+                "https://b.com/real-1",      # in whitelist
+                "https://evil.com/fake",     # hallucinated
+                "https://b.com/real-2",      # in whitelist
+            ],
+            "controversy_type": "其他",
+        }])
+        allowed = {"https://b.com/real-1", "https://b.com/real-2"}
+        events = _parse_events(raw, allowed_urls=allowed)
+
+        assert len(events) == 1
+        assert events[0]["source_urls"] == ["https://b.com/real-1", "https://b.com/real-2"]
+
+    def test_url_whitelist_drops_event_with_no_real_sources(self):
+        raw = json.dumps([
+            {
+                "title": "全幻觉事件",
+                "content": "all fake",
+                "source_urls": ["https://evil.com/a", "https://evil.com/b"],
+                "controversy_type": "其他",
+            },
+            {
+                "title": "保留事件",
+                "content": "real",
+                "source_urls": ["https://b.com/real"],
+                "controversy_type": "其他",
+            },
+        ])
+        allowed = {"https://b.com/real"}
+        events = _parse_events(raw, allowed_urls=allowed)
+
+        assert len(events) == 1
+        assert events[0]["title"] == "保留事件"
+
 
 class TestTriageRawJsonl:
     def test_multi_file_input(self, tmp_path):
@@ -118,6 +156,7 @@ class TestTriageRawJsonl:
             "title": "B站视频标题足够长的内容",
             "description": "描述",
             "arcurl": "https://b.com/1",
+            "bvid": "BV_TEST_1",
             "keyword": "测试",
         }) + "\n", encoding="utf-8")
 
@@ -125,6 +164,7 @@ class TestTriageRawJsonl:
             "title": "小红书笔记标题足够长的内容",
             "description": "描述",
             "source_url": "https://xhs.com/1",
+            "note_id": "note-test-1",
             "keyword": "测试",
         }) + "\n", encoding="utf-8")
 
@@ -135,7 +175,7 @@ class TestTriageRawJsonl:
             "controversy_type": "其他",
         }])
 
-        with patch("src.ingest.triage._call_llm", return_value=mock_events):
+        with patch("src.ingest.triage.llm_chat", return_value=mock_events):
             out = triage_raw_jsonl([bili, xhs], candidate_dir=tmp_path / "out")
 
         assert out.exists()
@@ -145,6 +185,10 @@ class TestTriageRawJsonl:
         assert event["title"] == "测试争议"
         assert event["keyword"] == "测试"
         assert len(event["source_urls"]) == 2
+        assert event["source_refs"] == [
+            {"url": "https://b.com/1", "raw_id": "BV_TEST_1", "platform": "bilibili"},
+            {"url": "https://xhs.com/1", "raw_id": "note-test-1", "platform": "xhs"},
+        ]
 
     def test_all_noise_no_llm_call(self, tmp_path):
         """When all records are noise, LLM is not called."""
@@ -159,7 +203,7 @@ class TestTriageRawJsonl:
         }) + "\n", encoding="utf-8")
 
         mock_llm = MagicMock()
-        with patch("src.ingest.triage._call_llm", mock_llm):
+        with patch("src.ingest.triage.llm_chat", mock_llm):
             out = triage_raw_jsonl([raw], candidate_dir=tmp_path / "out")
 
         mock_llm.assert_not_called()
