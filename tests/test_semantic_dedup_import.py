@@ -5,9 +5,9 @@ from uuid import uuid4
 
 import pytest
 
-from src.analyzer.analyzer import slugify
+from src.analyzer.analyzer import hash_suffix, slugify
 from src.config import settings
-from src.db.crud import count_rumors, get_rumor_by_slug
+from src.db.crud import count_rumors, get_rumor_by_slug, get_rumor_by_slug_hash
 from src.main import import_candidate_jsonl, import_jsonl_file
 
 from tests.conftest import write_jsonl
@@ -96,18 +96,24 @@ def test_jsonl_import_skips_similar_sample_texts(tmp_path, db, variant_title, va
         ),
     ],
 )
-def test_candidate_import_skips_similar_candidate_texts(tmp_path, db, variant_title, variant_content):
+def test_candidate_import_merges_similar_candidate_texts(tmp_path, db, variant_title, variant_content):
     sample = _read_first_jsonl(CANDIDATE_SAMPLE)
     probe = uuid4().hex[:8]
+    seed_url = f"https://seed.example.com/{probe}"
+    variant_url = f"https://variant.example.com/{probe}"
     seed = {
         **sample,
         "title": f"{sample['title']} {probe}",
         "content": f"{sample['content']}\n样本编号：{probe}",
+        "source_urls": [seed_url],
+        "keyword": f"seed-keyword-{probe}",
     }
     variant = {
         **sample,
         "title": f"{variant_title} {probe}",
         "content": f"{variant_content}\n样本编号：{probe}",
+        "source_urls": [variant_url],
+        "keyword": f"variant-keyword-{probe}",
     }
 
     with patch("src.main._safe_get_embedding", return_value=_base_embedding()):
@@ -121,6 +127,66 @@ def test_candidate_import_skips_similar_candidate_texts(tmp_path, db, variant_ti
 
     assert stats.processed == 1
     assert stats.succeeded == 0
-    assert stats.duplicates == 1
+    assert stats.duplicates == 0
+    assert stats.merged == 1
     assert stats.failed == 0
     assert count_rumors(db) == before_count
+
+    seed_slug = slugify(seed["title"])
+    rumor = get_rumor_by_slug_hash(db, hash_suffix(f"{seed['title']}\n{seed['content']}"))
+    assert rumor is not None
+    assert rumor.slug.startswith(seed_slug)
+    assert seed_url in (rumor.source_urls or [])
+    assert variant_url in (rumor.source_urls or [])
+    assert seed["keyword"] in (rumor.tags or [])
+    assert variant["keyword"] in (rumor.tags or [])
+    assert rumor.merge_count == 1
+
+
+# ─── Lower-level helpers (unit, no DB) ───────────────────────────────────────
+
+class TestResolveSlug:
+    def test_high_similarity_rejected(self):
+        """When find_similar_rumor matches, _resolve_slug returns hit with existing rumor."""
+        from src.main import _resolve_slug
+        from unittest.mock import MagicMock
+
+        vec = [1.0] * settings.EMBEDDING_DIM
+        db = MagicMock()
+        with patch("src.main.get_rumor_by_slug", return_value=None):
+            similar_rumor = MagicMock()
+            similar_rumor.slug = "existing-slug"
+            with patch("src.main.find_similar_rumor", return_value=similar_rumor):
+                result = _resolve_slug(db, "test-slug", "content", vec)
+                assert result.slug is None
+                assert result.existing is similar_rumor
+
+    def test_low_similarity_passes(self):
+        from src.main import _resolve_slug
+        from unittest.mock import MagicMock
+
+        vec = [1.0] * settings.EMBEDDING_DIM
+        db = MagicMock()
+        with patch("src.main.get_rumor_by_slug", return_value=None):
+            with patch("src.main.find_similar_rumor", return_value=None):
+                result = _resolve_slug(db, "test-slug", "content", vec)
+                assert result.slug == "test-slug"
+                assert result.existing is None
+
+    def test_no_embedding_falls_back_to_hash(self):
+        from src.main import _resolve_slug
+        from unittest.mock import MagicMock
+
+        db = MagicMock()
+        with patch("src.main.get_rumor_by_slug", return_value=None):
+            result = _resolve_slug(db, "test-slug", "content", None)
+            assert result.slug == "test-slug"
+            assert result.existing is None
+
+
+class TestSafeGetEmbedding:
+    def test_returns_none_on_failure(self):
+        from src.main import _safe_get_embedding
+
+        with patch("src.main.get_embedding", side_effect=RuntimeError("API down")):
+            assert _safe_get_embedding("test text") is None

@@ -1,0 +1,36 @@
+{# 视频卡片 — 由公开站详情页调用，每条 video item 渲染一个卡片 #}
+{# Item shape: {url, caption, platform: VideoPlatform(key, label, accent)} #}
+
+{% set accent_classes = {
+  'fuchsia': {'badge': 'bg-fuchsia-50 text-fuchsia-700 ring-fuchsia-200', 'icon': 'text-fuchsia-500'},
+  'red':     {'badge': 'bg-red-50 text-red-700 ring-red-200',             'icon': 'text-red-500'},
+  'rose':    {'badge': 'bg-rose-50 text-rose-700 ring-rose-200',          'icon': 'text-rose-500'},
+  'amber':   {'badge': 'bg-amber-50 text-amber-800 ring-amber-200',       'icon': 'text-amber-500'},
+  'neutral': {'badge': 'bg-stone-100 text-stone-700 ring-stone-200',      'icon': 'text-stone-500'},
+  'sky':     {'badge': 'bg-sky-50 text-sky-700 ring-sky-200',             'icon': 'text-sky-500'},
+} %}
+{% set cls = accent_classes.get(item.platform.accent, accent_classes['sky']) %}
+
+<a
+  href="{{ item.url }}"
+  target="_blank" rel="noopener nofollow"
+  class="group relative flex items-center gap-4 bg-white border border-stone-200/80 rounded-xl p-4 hover:border-stone-300 hover:shadow-[0_2px_16px_-10px_rgba(28,25,23,0.16)] transition-all"
+>
+  <div class="shrink-0 h-12 w-12 rounded-lg bg-stone-50 ring-1 ring-stone-200/60 flex items-center justify-center {{ cls.icon }}">
+    <svg class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+  </div>
+  <div class="min-w-0 flex-1">
+    <div class="flex items-center gap-2 mb-1">
+      <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium uppercase tracking-wide ring-1 ring-inset {{ cls.badge }}">
+        {{ item.platform.label }}
+      </span>
+      {% if item.caption %}
+      <span class="text-xs text-stone-500 truncate">{{ item.caption }}</span>
+      {% endif %}
+    </div>
+    <p class="text-xs text-stone-400 truncate font-mono">{{ item.url }}</p>
+  </div>
+  <svg class="shrink-0 h-4 w-4 text-stone-300 group-hover:text-stone-500 transition-colors" fill="none" viewBox="0 0 24 24" stroke-width="1.6" stroke="currentColor">
+    <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"/>
+  </svg>
+</a>

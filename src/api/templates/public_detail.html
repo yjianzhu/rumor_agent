@@ -1,0 +1,141 @@
+{% extends "public_base.html" %}
+
+{% block title %}{{ rumor.title }} · 辟谣{% endblock %}
+
+{% set status_meta = {
+  'FAKE':     {'label': '虚假', 'pill': 'bg-rose-50 text-rose-700 ring-rose-200',          'rule': 'border-rose-300'},
+  'TRUE':     {'label': '属实', 'pill': 'bg-emerald-50 text-emerald-700 ring-emerald-200', 'rule': 'border-emerald-300'},
+  'OUTDATED': {'label': '过时', 'pill': 'bg-stone-100 text-stone-600 ring-stone-200',       'rule': 'border-stone-300'},
+  'DUBIOUS':  {'label': '存疑', 'pill': 'bg-amber-50 text-amber-700 ring-amber-200',        'rule': 'border-amber-300'},
+} %}
+{% set meta = status_meta.get(rumor.status.value, status_meta['DUBIOUS']) %}
+
+{% block content %}
+<article class="max-w-3xl mx-auto px-5 sm:px-8 pt-12 pb-16">
+
+  <a href="/" class="inline-flex items-center gap-1 text-sm text-stone-400 hover:text-stone-700 transition-colors mb-8">
+    <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke-width="1.6" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5"/>
+    </svg>
+    返回谣言库
+  </a>
+
+  <header class="mb-10">
+    <div class="flex items-center gap-3 mb-4">
+      <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ring-1 ring-inset {{ meta.pill }}">
+        {{ meta.label }}
+      </span>
+      <span class="text-xs text-stone-400">
+        {{ rumor.created_at.strftime('%Y-%m-%d') }}
+        {% if rumor.updated_at and (rumor.updated_at - rumor.created_at).total_seconds() > 60 %}
+        · 更新于 {{ rumor.updated_at.strftime('%Y-%m-%d') }}
+        {% endif %}
+      </span>
+    </div>
+    <h1 class="font-serif text-3xl sm:text-4xl font-bold tracking-tight leading-tight text-ink">
+      {{ rumor.title }}
+    </h1>
+    {% if rumor.summary %}
+    <p class="mt-5 text-lg text-stone-600 leading-relaxed font-light">{{ rumor.summary }}</p>
+    {% endif %}
+  </header>
+
+  <div class="space-y-10">
+
+    {% if rumor.rumor_content %}
+    <section>
+      <h2 class="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-rose-600 mb-3">
+        <span class="h-px flex-1 bg-rose-100"></span>
+        <span>传言内容</span>
+        <span class="h-px flex-1 bg-rose-100"></span>
+      </h2>
+      <div class="bg-rose-50/40 border-l-2 border-rose-300 rounded-r-lg px-5 py-4">
+        <p class="text-stone-800 leading-[1.85] whitespace-pre-wrap">{{ rumor.rumor_content }}</p>
+      </div>
+    </section>
+    {% endif %}
+
+    {% if rumor.truth_content %}
+    <section>
+      <h2 class="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700 mb-3">
+        <span class="h-px flex-1 bg-emerald-100"></span>
+        <span>事实核查</span>
+        <span class="h-px flex-1 bg-emerald-100"></span>
+      </h2>
+      <div class="bg-emerald-50/40 border-l-2 border-emerald-300 rounded-r-lg px-5 py-4">
+        <div class="markdown-body text-stone-800">{{ rumor.truth_content | markdown }}</div>
+      </div>
+    </section>
+    {% endif %}
+
+    {% if images %}
+    <section>
+      <h2 class="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500 mb-3">图片证据</h2>
+      <div class="grid {% if images|length == 1 %}grid-cols-1{% else %}grid-cols-1 sm:grid-cols-2{% endif %} gap-4">
+        {% for img in images %}
+        <figure>
+          <a href="/media/{{ img.path }}" target="_blank" rel="noopener" class="block overflow-hidden rounded-xl border border-stone-200/80 bg-stone-100">
+            <img src="/media/{{ img.path }}" alt="{{ img.caption }}" class="w-full h-auto object-cover hover:opacity-95 transition-opacity">
+          </a>
+          {% if img.caption %}
+          <figcaption class="text-xs text-stone-400 mt-2">{{ img.caption }}</figcaption>
+          {% endif %}
+        </figure>
+        {% endfor %}
+      </div>
+    </section>
+    {% endif %}
+
+    {% if videos %}
+    <section>
+      <h2 class="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500 mb-3">相关视频</h2>
+      <div class="space-y-3">
+        {% for item in videos %}
+          {% include "public/partials/video_card.html" %}
+        {% endfor %}
+      </div>
+    </section>
+    {% endif %}
+
+    {% if rumor.source_urls %}
+    <section>
+      <h2 class="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500 mb-3">信息来源 ({{ rumor.source_urls|length }})</h2>
+      <ul class="space-y-2">
+        {% for url in rumor.source_urls %}
+        <li class="flex items-baseline gap-2">
+          <span class="text-stone-300 text-xs">·</span>
+          <a href="{{ url }}" target="_blank" rel="noopener nofollow"
+             class="text-sm text-stone-600 hover:text-ink underline decoration-stone-300 hover:decoration-stone-500 underline-offset-4 transition-colors break-all">
+            {{ url }}
+          </a>
+        </li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
+
+    {% if analysis and analysis.evidence %}
+    <section>
+      <h2 class="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500 mb-3">核查依据</h2>
+      <div class="bg-stone-50 border border-stone-200/80 rounded-lg px-5 py-4">
+        <p class="text-sm text-stone-700 leading-[1.85] whitespace-pre-wrap">{{ analysis.evidence }}</p>
+        {% if analysis.model_name %}
+        <p class="mt-3 text-[11px] text-stone-400">分析模型：{{ analysis.model_name }}</p>
+        {% endif %}
+      </div>
+    </section>
+    {% endif %}
+
+    {% if rumor.tags %}
+    <section class="pt-2">
+      <div class="flex flex-wrap gap-2">
+        {% for t in rumor.tags %}
+        <span class="text-xs text-stone-500 bg-stone-100/80 px-2.5 py-1 rounded">#{{ t }}</span>
+        {% endfor %}
+      </div>
+    </section>
+    {% endif %}
+
+  </div>
+</article>
+{% endblock %}

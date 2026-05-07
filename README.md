@@ -50,7 +50,7 @@ collect-bili / collect-xhs  →  triage-jsonl          →    import-candidate-j
 ## 安装
 
 ```bash
-uv pip install -r requirements.txt
+uv sync
 ```
 
 ## 初始化数据库
@@ -202,8 +202,7 @@ import_batch_size = 50
 rumor_agent/
 ├── config.toml                # 配置
 ├── init_db.py                 # 建表脚本（drop & recreate 流程）
-├── requirements.txt
-├── pyproject.toml             # pytest 配置
+├── pyproject.toml             # 依赖 + pytest 配置（uv 管理）
 ├── src/
 │   ├── main.py                # CLI 入口
 │   ├── config.py              # config.toml 加载
@@ -231,7 +230,7 @@ rumor_agent/
 │       ├── models.py          # ORM
 │       ├── schemas.py         # Pydantic（含 RumorReviewIn）
 │       └── crud.py            # CRUD + 语义去重
-├── tests/                     # pytest（88 用例）
+├── tests/                     # pytest
 ├── docs/
 └── data/staging/{raw,candidates}/
 ```

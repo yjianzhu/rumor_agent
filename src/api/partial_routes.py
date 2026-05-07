@@ -1,10 +1,10 @@
-from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
-from src.api.deps import get_db_session, TEMPLATES_DIR, resolve_view
+from src.api.deps import get_db_session, make_templates, resolve_view
 from src.db.crud import (
+    add_media_files,
     count_by_status,
     count_published,
     count_recent,
@@ -13,14 +13,16 @@ from src.db.crud import (
     get_rumor_by_slug,
     get_rumor_detail_by_slug,
     list_rumors,
+    remove_media_file,
     update_rumor,
 )
 from src.db.models import RumorStatus
 from src.db.schemas import RumorUpdate
+from src.media import save_image
 
-templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+templates = make_templates()
 
-router = APIRouter(prefix="/partials")
+router = APIRouter(prefix="/admin/partials")
 
 DEFAULT_LIMIT = 20
 
@@ -122,3 +124,124 @@ def stats_partial(
     return templates.TemplateResponse(request, "partials/stats_bar.html", {
         "stats": stats,
     })
+
+
+# ─── Media manager (审核台图片素材上传/删除) ────────────────────────────────
+
+import io
+import re
+import time
+from PIL import Image, UnidentifiedImageError
+
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MiB
+ALLOWED_IMAGE_MIMES = {"image/png", "image/jpeg", "image/webp", "image/gif"}
+_EXT_BY_MIME = {
+    "image/png": ".png", "image/jpeg": ".jpg",
+    "image/webp": ".webp", "image/gif": ".gif",
+}
+
+
+def _safe_filename_stem(name: str) -> str:
+    """Return a slug-safe filename stem from the user-provided name."""
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("._") or "img"
+    return stem[:60]
+
+
+def _render_media_manager(request: Request, rumor, error: str | None = None) -> HTMLResponse:
+    return templates.TemplateResponse(request, "partials/media_manager.html", {
+        "rumor": rumor,
+        "error": error,
+        "max_mb": MAX_UPLOAD_BYTES // (1024 * 1024),
+    })
+
+
+@router.get("/rumors/{slug}/media", response_class=HTMLResponse)
+def media_manager_partial(
+    request: Request,
+    slug: str,
+    db: Session = Depends(get_db_session),
+):
+    rumor = get_rumor_by_slug(db, slug)
+    if rumor is None:
+        raise HTTPException(status_code=404, detail="Rumor not found")
+    return _render_media_manager(request, rumor)
+
+
+@router.post("/rumors/{slug}/media", response_class=HTMLResponse)
+async def upload_media_partial(
+    request: Request,
+    slug: str,
+    files: list[UploadFile] = File(...),
+    caption: str = Form(""),
+    db: Session = Depends(get_db_session),
+):
+    rumor = get_rumor_by_slug(db, slug)
+    if rumor is None:
+        raise HTTPException(status_code=404, detail="Rumor not found")
+
+    new_items: list[dict] = []
+    error: str | None = None
+
+    for upload in files:
+        if upload.content_type not in ALLOWED_IMAGE_MIMES:
+            error = f"不支持的格式：{upload.filename} ({upload.content_type})"
+            continue
+
+        data = await upload.read()
+        if len(data) > MAX_UPLOAD_BYTES:
+            error = f"超出 {MAX_UPLOAD_BYTES // (1024*1024)}MB 上限：{upload.filename}"
+            continue
+        if not data:
+            error = f"空文件：{upload.filename}"
+            continue
+
+        # Pillow 二次校验（防伪造 MIME）
+        try:
+            with Image.open(io.BytesIO(data)) as im:
+                im.verify()
+        except (UnidentifiedImageError, Exception):
+            error = f"不是有效图片：{upload.filename}"
+            continue
+
+        original = upload.filename or "image"
+        stem = _safe_filename_stem(original.rsplit(".", 1)[0])
+        ext = _EXT_BY_MIME.get(upload.content_type, ".bin")
+        # 时间戳前缀防同名覆盖
+        filename = f"{int(time.time() * 1000)}_{stem}{ext}"
+
+        rel_path = save_image(data, slug, filename)
+        new_items.append({
+            "type": "image",
+            "path": rel_path,
+            "label": "evidence",
+            "caption": caption.strip(),
+        })
+
+    if new_items:
+        add_media_files(db, rumor.id, new_items)
+        db.commit()
+        rumor = get_rumor_by_slug(db, slug)
+
+    return _render_media_manager(request, rumor, error=error)
+
+
+@router.delete("/rumors/{slug}/media", response_class=HTMLResponse)
+def delete_media_partial(
+    request: Request,
+    slug: str,
+    path: str,
+    db: Session = Depends(get_db_session),
+):
+    rumor = get_rumor_by_slug(db, slug)
+    if rumor is None:
+        raise HTTPException(status_code=404, detail="Rumor not found")
+
+    # 仅允许删除 rumor 自身 media_files 中存在的 path（防越权）
+    existing = {(m or {}).get("path") for m in (rumor.media_files or [])}
+    if path not in existing:
+        raise HTTPException(status_code=400, detail="Path not in this rumor")
+
+    remove_media_file(db, rumor.id, path)
+    db.commit()
+    rumor = get_rumor_by_slug(db, slug)
+    return _render_media_manager(request, rumor)

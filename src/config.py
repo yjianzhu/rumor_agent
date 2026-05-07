@@ -41,6 +41,9 @@ class Config:
 
     COLLECT_KEYWORDS: list[str] = field(default_factory=list)
     BILI_MIN_PLAY: int = 100
+    BILI_COMMENT_TOP_N: int = 10
+    XHS_COMMENT_TOP_N: int = 10
+    BILI_COMMENT_CONCURRENCY: int = 3
 
     MEDIA_DIR: str = "media"
     IMPORT_BATCH_SIZE: int = 50
@@ -105,6 +108,9 @@ def _load_config(path: Path = _CONFIG_PATH) -> Config:
         XHS_MAX_RETRIES=int(xhs.get("max_retries", 3)),
         COLLECT_KEYWORDS=collect.get("keywords", []),
         BILI_MIN_PLAY=int(collect.get("bili_min_play", 100)),
+        BILI_COMMENT_TOP_N=int(collect.get("bili_comment_top_n", 10)),
+        XHS_COMMENT_TOP_N=int(collect.get("xhs_comment_top_n", 10)),
+        BILI_COMMENT_CONCURRENCY=int(collect.get("bili_comment_concurrency", 3)),
         MEDIA_DIR=gen.get("media_dir", "media"),
         IMPORT_BATCH_SIZE=int(gen.get("import_batch_size", 50)),
     )

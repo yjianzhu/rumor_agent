@@ -18,7 +18,7 @@
 | Phase 5 | Web 审核界面 + 框架硬故障修复 | ✅ 已完成（2026-05-05） |
 | Phase 6 | 自动化流水线（OS 级调度） | ✅ 已完成（2026-05-06） |
 
-**测试覆盖**：93 用例全绿（含端到端 e2e 与 pipeline orchestration）
+**测试覆盖**：117 用例（11 个测试文件，覆盖 collector / triage / import / review API & UI / pipeline orchestration）
 
 ---
 

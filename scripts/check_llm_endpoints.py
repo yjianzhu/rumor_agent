@@ -62,30 +62,20 @@ def _probe_endpoint(
     ep: dict[str, Any],
     default_model: str,
     timeout: float,
-    force_style: str | None = None,
-) -> tuple[bool, str, str | None]:
-    """Returns (ok, reason, detected_api_style)."""
+    *,
+    kind: str,
+) -> tuple[bool, str]:
     model = (ep.get("model") or default_model).strip()
     if not model:
-        return False, "missing model", None
+        return False, "missing model"
     if not ep.get("api_base"):
-        return False, "missing api_base", None
+        return False, "missing api_base"
 
-    style = force_style or ep.get("api_style", "")
-
-    if style == "embedding":
-        try:
-            ok, msg = _probe_embedding(ep, model, timeout)
-            return ok, msg, "embedding"
-        except Exception as exc:
-            return False, _fmt_error(exc), None
-
-    # chat or auto-detect
+    probe = _probe_embedding if kind == "embedding" else _probe_chat
     try:
-        ok, msg = _probe_chat(ep, model, timeout)
-        return ok, msg, "chat"
+        return probe(ep, model, timeout)
     except Exception as exc:
-        return False, _fmt_error(exc), None
+        return False, _fmt_error(exc)
 
 
 def _fmt_error(exc: Exception) -> str:
@@ -119,10 +109,12 @@ def _check_section(
     endpoints: list[dict],
     default_model: str,
     timeout: float,
-    force_style: str | None,
+    *,
+    kind: str,
 ) -> tuple[list[dict], list[dict]]:
     available: list[dict[str, Any]] = []
     unavailable: list[dict[str, Any]] = []
+    api_label = _STYLE_LABELS.get(kind, "")
 
     for i, ep in enumerate(endpoints, start=1):
         if not isinstance(ep, dict):
@@ -130,16 +122,12 @@ def _check_section(
             print(f"  [{i}/{len(endpoints)}] FAIL (not a valid endpoint object)")
             continue
 
-        ok, reason, detected_style = _probe_endpoint(ep, default_model, timeout, force_style)
+        ok, reason = _probe_endpoint(ep, default_model, timeout, kind=kind)
         safe_base = ep.get("api_base", "?")
         safe_model = ep.get("model") or default_model
-        api_label = _STYLE_LABELS.get(detected_style or "", "")
 
         if ok:
-            result_ep = dict(ep)
-            if detected_style:
-                result_ep["api_style"] = detected_style
-            available.append(result_ep)
+            available.append(dict(ep))
             print(f"  [{i}/{len(endpoints)}] OK   {safe_base} | model={safe_model} | api={api_label}")
             print(f"         {reason}")
         else:
@@ -161,12 +149,6 @@ def main() -> int:
     )
     parser.add_argument("--config", default="config.toml", help="Path to config.toml")
     parser.add_argument("--timeout", type=float, default=15.0, help="Request timeout (seconds)")
-    parser.add_argument(
-        "--api-style",
-        choices=["auto", "chat"],
-        default="auto",
-        help="Force a specific LLM API style (default: auto-detect)",
-    )
     parser.add_argument("--skip-embedding", action="store_true", help="Skip embedding endpoint checks")
     args = parser.parse_args()
 
@@ -180,7 +162,6 @@ def main() -> int:
 
     llm = data.get("llm", {})
     emb = data.get("embedding", {})
-    force_style = None if args.api_style == "auto" else args.api_style
 
     # ── LLM endpoints ────────────────────────────────────────────────────
     llm_endpoints = llm.get("endpoints", [])
@@ -188,9 +169,9 @@ def main() -> int:
     llm_unavail: list[dict] = []
     if llm_endpoints:
         default_model = llm.get("model", "")
-        print(f"[LLM] {len(llm_endpoints)} endpoint(s), mode={args.api_style}")
+        print(f"[LLM] {len(llm_endpoints)} endpoint(s)")
         llm_available, llm_unavail = _check_section(
-            llm_endpoints, default_model, args.timeout, force_style,
+            llm_endpoints, default_model, args.timeout, kind="chat",
         )
         print(f"[LLM] available {len(llm_available)}, failed {len(llm_unavail)}")
     else:
@@ -204,7 +185,7 @@ def main() -> int:
         default_emb_model = emb.get("model", "")
         print(f"\n[Embedding] {len(emb_endpoints)} endpoint(s)")
         emb_available, emb_unavail = _check_section(
-            emb_endpoints, default_emb_model, args.timeout, "embedding",
+            emb_endpoints, default_emb_model, args.timeout, kind="embedding",
         )
         print(f"[Embedding] available {len(emb_available)}, failed {len(emb_unavail)}")
     elif not args.skip_embedding:

@@ -30,17 +30,20 @@ TRIAGE_PROMPT_TEMPLATE = """\
 
 任务背景：
 - 当前搜索关键词：{keyword}
-- 输入是一批社交媒体搜索结果，字段包括：title、description、url、author、rank_meta。
-- 你的任务是识别“谣言、争议、未经证实说法、有明显分歧观点”的内容，并按同一争议点合并。
+- 输入是一批社交媒体搜索结果，字段包括：title、description、url、author、rank_meta、comments。
+- comments 是该帖子评论区前 N 条高赞评论，是辅助信号；评论中的二次质疑、相互冲突的叙述也算争议线索，但要分清楚是网友质疑还是无关八卦/调侃。
+- 你的任务是识别"谣言、争议、未经证实说法、有明显分歧观点"的内容，并按同一争议点合并。
 
 识别规则：
-1. 识别“应纳入争议”的内容：
+1. 识别"应纳入争议"的内容：
    - 明确指控、质疑、爆料、维权、投诉、质疑官方说法；
    - 对质量/安全/性能/价格/宣传/合规/售后提出争议；
-   - 对同一事件出现相互冲突或对立叙事。
-2. 过滤“非争议”内容：
+   - 对同一事件出现相互冲突或对立叙事；
+   - 帖子本身平淡但评论区集中出现高赞质疑，也可纳入。
+2. 过滤"非争议"内容：
    - 普通开箱、体验、教程、娱乐内容；
-   - 与关键词弱相关或几乎无信息量的内容。
+   - 与关键词弱相关或几乎无信息量的内容；
+   - 评论区只有调侃 / 表情包 / 与关键词无关的灌水。
 3. 可参考 author 与 rank_meta 判断代表性，优先保留更有传播度或信息密度的来源。
 4. 不做真假裁决，只客观归纳争议点。
 
@@ -54,16 +57,17 @@ TRIAGE_PROMPT_TEMPLATE = """\
 - 若没有争议内容，返回 []。
 - 仅返回 JSON，不要 markdown 代码块或额外解释文本。
 - content 写作风格要求：
-  - 不要使用“有视频称/有内容称/有帖子称”等空泛主语。
-  - 优先使用“平台 + 作者”作为主语并直接归因，例如：
-    - “小红书用户<author>称……”
-    - “Bilibili用户<author>称……”
+  - 不要使用"有视频称/有内容称/有帖子称"等空泛主语。
+  - 优先使用"平台 + 作者"作为主语并直接归因，例如：
+    - "小红书用户<author>称……"
+    - "Bilibili用户<author>称……"
   - 平台可根据 URL 域名判断（`xiaohongshu.com` => 小红书；`bilibili.com` => Bilibili）。
-  - 若 author 为空，再退化为“某小红书用户/某Bilibili用户”。
+  - 若 author 为空，再退化为"某小红书用户/某Bilibili用户"。
+  - 若主要争议来自评论区，可写"评论区集中质疑……"。
 
 示例（仅示意）：
-输入中若出现“产品A被指宣传参数与实测不符”“商家疑似虚假宣传”；
-可输出 controversy_type 为“营销宣传”，而不是“其他”。
+输入中若出现"产品A被指宣传参数与实测不符""商家疑似虚假宣传"；
+可输出 controversy_type 为"营销宣传"，而不是"其他"。
 """
 
 ALLOWED_CONTROVERSY_TYPES = {
@@ -142,6 +146,22 @@ def _build_source_lookup(records: list[dict[str, Any]]) -> dict[str, dict[str, s
     return lookup
 
 
+def _format_comments(comments: Any) -> list[str]:
+    if not isinstance(comments, list):
+        return []
+    out: list[str] = []
+    for c in comments:
+        if not isinstance(c, dict):
+            continue
+        text = (c.get("text") or "").strip()
+        if not text:
+            continue
+        author = (c.get("author") or "").strip() or "匿名"
+        like = c.get("like") or 0
+        out.append(f"{author}(👍{like}): {text}")
+    return out
+
+
 def _build_llm_input(records: list[dict[str, Any]], keyword: str = "") -> str:
     items = []
     for r in records:
@@ -151,6 +171,7 @@ def _build_llm_input(records: list[dict[str, Any]], keyword: str = "") -> str:
             "url": _get_url(r),
             "author": r.get("author", ""),
             "rank_meta": r.get("rank_meta", {}),
+            "comments": _format_comments(r.get("comments")),
         })
     payload = {
         "search_keyword": keyword,

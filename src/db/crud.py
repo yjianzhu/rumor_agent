@@ -122,6 +122,44 @@ def update_rumor(db: Session, rumor_id: UUID, data: RumorUpdate) -> Rumor | None
     return rumor
 
 
+def merge_into_rumor(
+    db: Session,
+    rumor: Rumor,
+    *,
+    new_source_urls: list[str] | None,
+    new_tags: list[str] | None,
+) -> tuple[Rumor, bool]:
+    """Union-merge new source_urls / tags into an existing rumor.
+
+    Returns (rumor, changed). Increments merge_count and flushes when changed.
+    updated_at is refreshed by the DB trigger.
+    """
+    changed = False
+
+    if new_source_urls:
+        existing = list(rumor.source_urls or [])
+        seen = set(existing)
+        added = [u for u in new_source_urls if u and u not in seen]
+        if added:
+            rumor.source_urls = existing + added
+            changed = True
+
+    if new_tags:
+        existing_tags = list(rumor.tags or [])
+        seen_tags = set(existing_tags)
+        added_tags = [t for t in new_tags if t and t not in seen_tags]
+        if added_tags:
+            rumor.tags = existing_tags + added_tags
+            changed = True
+
+    if changed:
+        rumor.merge_count = (rumor.merge_count or 0) + 1
+        db.flush()
+        db.refresh(rumor)
+
+    return rumor, changed
+
+
 def delete_rumor(db: Session, rumor_id: UUID) -> bool:
     """Delete a rumor by ID. Cascade deletes associated analysis. Returns True if deleted."""
     rumor = db.get(Rumor, rumor_id)
@@ -130,6 +168,32 @@ def delete_rumor(db: Session, rumor_id: UUID) -> bool:
     db.delete(rumor)
     db.flush()
     return True
+
+
+def add_media_files(db: Session, rumor_id: UUID, items: list[dict]) -> Rumor | None:
+    """Append media items (already-validated dicts) to rumor.media_files."""
+    rumor = db.get(Rumor, rumor_id)
+    if not rumor:
+        return None
+    rumor.media_files = list(rumor.media_files or []) + items
+    db.flush()
+    db.refresh(rumor)
+    return rumor
+
+
+def remove_media_file(db: Session, rumor_id: UUID, path: str) -> Rumor | None:
+    """Remove the first media item whose `path` matches. Disk file is left intact."""
+    rumor = db.get(Rumor, rumor_id)
+    if not rumor:
+        return None
+    current = list(rumor.media_files or [])
+    kept = [m for m in current if m.get("path") != path]
+    if len(kept) == len(current):
+        return rumor
+    rumor.media_files = kept
+    db.flush()
+    db.refresh(rumor)
+    return rumor
 
 
 # ─── AnalysisResult CRUD ───

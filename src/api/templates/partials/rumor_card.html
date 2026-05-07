@@ -5,9 +5,12 @@
   'OUTDATED': 'bg-slate-100 text-slate-500'
 } %}
 
-<a href="/rumors/{{ rumor.slug }}" class="block bg-white rounded-xl border border-slate-200/60 overflow-hidden shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-200">
+<a href="/admin/rumors/{{ rumor.slug }}" class="block bg-white rounded-xl border border-slate-200/60 overflow-hidden shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-200">
   {% if rumor.media_files %}
-  <img src="/media/{{ rumor.media_files[0].path }}" alt="{{ rumor.media_files[0].caption }}" class="w-full h-40 object-cover">
+  {% set first = rumor.media_files[0] %}
+  {% if first.type == 'image' %}
+  <img src="/media/{{ first.path }}" alt="{{ first.caption }}" class="w-full h-40 object-cover">
+  {% endif %}
   {% endif %}
 
   <div class="p-5">

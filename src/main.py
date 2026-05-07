@@ -27,7 +27,14 @@ from src.analyzer.analyzer import (
 )
 from src.config import settings
 from src.db.base import SessionLocal
-from src.db.crud import create_analysis_result, create_rumor, find_similar_rumor, get_rumor_by_slug, get_rumor_by_slug_hash
+from src.db.crud import (
+    create_analysis_result,
+    create_rumor,
+    find_similar_rumor,
+    get_rumor_by_slug,
+    get_rumor_by_slug_hash,
+    merge_into_rumor,
+)
 from src.db.models import Rumor, RumorStatus
 from src.db.schemas import AnalysisResultCreate, RumorCreate, RumorDirectIn
 from src.embedding import get_embedding
@@ -40,6 +47,18 @@ class ImportStats:
     succeeded: int = 0
     failed: int = 0
     duplicates: int = 0
+    merged: int = 0
+
+
+@dataclass
+class ResolveResult:
+    """Result of slug/hash/embedding dedup lookup.
+
+    - slug is None when a duplicate was hit; existing then points to the row.
+    - slug is set (and existing is None) when the candidate is fresh.
+    """
+    slug: str | None
+    existing: Rumor | None = None
 
 
 @dataclass
@@ -116,7 +135,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Full pipeline: collect-bili + collect-xhs (per [collect].keywords) → triage → import-candidate. "
              "Designed for OS-level scheduling (cron / Task Scheduler).",
     )
+    group.add_argument(
+        "--schedule",
+        action="store_true",
+        help="Run --run-pipeline in a foreground loop, one iteration every "
+             "--interval-hours (default 2). Ctrl+C to stop.",
+    )
 
+    parser.add_argument("--interval-hours", type=float, default=2.0,
+                        help="Interval between pipeline runs when --schedule is set (default: 2).")
     parser.add_argument("--limit", type=int, help="Maximum number of records to process")
     parser.add_argument("--dry-run", action="store_true", help="Parse and preview without writing to the database")
     parser.add_argument("--model", help="Override the configured LLM model")
@@ -152,16 +179,16 @@ def main(argv: list[str] | None = None) -> int:
     if args.import_jsonl:
         stats = import_jsonl_file(args.import_jsonl, limit=args.limit, dry_run=args.dry_run)
         logger.info(
-            "Import finished. processed=%d succeeded=%d failed=%d duplicates=%d",
-            stats.processed, stats.succeeded, stats.failed, stats.duplicates,
+            "Import finished. processed=%d succeeded=%d failed=%d duplicates=%d merged=%d",
+            stats.processed, stats.succeeded, stats.failed, stats.duplicates, stats.merged,
         )
         return 0 if stats.failed == 0 else 1
 
     if args.import_md:
         stats = import_md_file(args.import_md, dry_run=args.dry_run, model=args.model)
         logger.info(
-            "Import finished. processed=%d succeeded=%d failed=%d duplicates=%d",
-            stats.processed, stats.succeeded, stats.failed, stats.duplicates,
+            "Import finished. processed=%d succeeded=%d failed=%d duplicates=%d merged=%d",
+            stats.processed, stats.succeeded, stats.failed, stats.duplicates, stats.merged,
         )
         return 0 if stats.failed == 0 else 1
 
@@ -224,14 +251,17 @@ def main(argv: list[str] | None = None) -> int:
             dry_run=args.dry_run,
         )
         logger.info(
-            "Candidate import done. processed=%d succeeded=%d failed=%d duplicates=%d",
-            stats.processed, stats.succeeded, stats.failed, stats.duplicates,
+            "Candidate import done. processed=%d succeeded=%d failed=%d duplicates=%d merged=%d",
+            stats.processed, stats.succeeded, stats.failed, stats.duplicates, stats.merged,
         )
         return 0 if stats.failed == 0 else 1
 
     if args.run_pipeline:
         summary = run_pipeline()
         return 1 if summary.failed else 0
+
+    if args.schedule:
+        return run_scheduled(interval_hours=args.interval_hours)
 
     logger.info("Network Rumor Agent initialized.")
     logger.info("Database models loaded.")
@@ -281,11 +311,11 @@ def import_jsonl_file(
                     # dry-run: skip embedding API but still hit DB for slug/hash dedup
                     emb = None if dry_run else _safe_get_embedding(dedup_content)
                     resolved = _resolve_slug(db, base_slug, dedup_content, emb)
-                    if resolved is None:
+                    if resolved.slug is None:
                         stats.duplicates += 1
                         logger.warning("Line %d: duplicate rumor skipped (slug=%s)", line_no, base_slug)
                         continue
-                    slug = resolved
+                    slug = resolved.slug
 
                     rumor_data = RumorCreate(
                         title=record.title,
@@ -366,7 +396,7 @@ def _resolve_slug(
     embedding: list[float] | None = None,
     *,
     always_hash: bool = False,
-) -> str | None:
+) -> ResolveResult:
     """Two-phase dedup: slug/hash check first, then semantic similarity.
 
     Args:
@@ -377,6 +407,11 @@ def _resolve_slug(
             hash to the slug and check for hash collisions only.  When False
             (direct JSONL path), try ``base_slug`` as-is first and only fall
             back to a hash-suffixed slug on collision.
+
+    Returns:
+        ResolveResult. ``slug is None`` indicates a duplicate; ``existing``
+        then points to the matched Rumor so the caller can decide to merge
+        or skip.
     """
     content_hash = hash_suffix(content)
     hashed_slug = f"{base_slug}-{content_hash}"
@@ -384,8 +419,9 @@ def _resolve_slug(
     if always_hash:
         # Hash-suffix path: slug always ends with content hash, so a matching
         # hash means identical content → skip.
-        if get_rumor_by_slug_hash(db, content_hash) is not None:
-            return None
+        existing = get_rumor_by_slug_hash(db, content_hash)
+        if existing is not None:
+            return ResolveResult(slug=None, existing=existing)
         candidate = hashed_slug
     else:
         # Direct path: prefer the explicit slug, fall back to hashed slug.
@@ -395,9 +431,10 @@ def _resolve_slug(
         else:
             existing_content = f"{existing.title}\n{existing.rumor_content or ''}"
             if hash_suffix(existing_content) == content_hash:
-                return None
-            if get_rumor_by_slug(db, hashed_slug) is not None:
-                return None
+                return ResolveResult(slug=None, existing=existing)
+            hashed_collision = get_rumor_by_slug(db, hashed_slug)
+            if hashed_collision is not None:
+                return ResolveResult(slug=None, existing=hashed_collision)
             candidate = hashed_slug
 
     # Pass 2: semantic similarity
@@ -405,9 +442,9 @@ def _resolve_slug(
         similar = find_similar_rumor(db, embedding)
         if similar is not None:
             logger.info("Semantic duplicate found: slug=%s similar_to=%s", base_slug, similar.slug)
-            return None
+            return ResolveResult(slug=None, existing=similar)
 
-    return candidate
+    return ResolveResult(slug=candidate, existing=None)
 
 
 # ─── Markdown import via LLM ─────────────────────────────────────────────────
@@ -432,11 +469,12 @@ def import_md_file(
         structured = analyze_sample(sample, model=model, client=analyzer)
 
         emb = None if dry_run else _safe_get_embedding(raw_text)
-        slug = _resolve_slug(db, slugify(structured.title), raw_text, emb, always_hash=True)
-        if slug is None:
+        resolved = _resolve_slug(db, slugify(structured.title), raw_text, emb, always_hash=True)
+        if resolved.slug is None:
             stats.duplicates = 1
             logger.warning("Duplicate rumor skipped for: %s", path.name)
             return stats
+        slug = resolved.slug
 
         rumor_data = to_rumor_create(structured, slug=slug, is_published=False, media_files=media_items)
 
@@ -532,14 +570,50 @@ def import_candidate_jsonl(
 
                     emb = None if dry_run else _safe_get_embedding(dedup_content)
                     resolved = _resolve_slug(db, base_slug, dedup_content, emb, always_hash=True)
-                    if resolved is None:
-                        stats.duplicates += 1
-                        logger.info("Line %d: duplicate skipped (slug=%s)", line_no, base_slug)
+                    if resolved.slug is None:
+                        # Duplicate hit: union-merge new sources/tags into the existing rumor.
+                        existing = resolved.existing
+                        if dry_run:
+                            stats.merged += 1
+                            logger.info(
+                                "Line %d: would merge into existing rumor (slug=%s)",
+                                line_no, existing.slug if existing else base_slug,
+                            )
+                            continue
+
+                        savepoint = db.begin_nested()
+                        try:
+                            _, changed = merge_into_rumor(
+                                db,
+                                existing,
+                                new_source_urls=source_urls or None,
+                                new_tags=tags or None,
+                            )
+                            savepoint.commit()
+                            if changed:
+                                stats.merged += 1
+                                pending_count += 1
+                                logger.info(
+                                    "Line %d: merged into existing rumor (slug=%s)",
+                                    line_no, existing.slug,
+                                )
+                                if pending_count >= settings.IMPORT_BATCH_SIZE:
+                                    db.commit()
+                                    pending_count = 0
+                            else:
+                                stats.duplicates += 1
+                                logger.info(
+                                    "Line %d: duplicate with no new sources/tags (slug=%s)",
+                                    line_no, existing.slug,
+                                )
+                        except Exception:
+                            savepoint.rollback()
+                            raise
                         continue
 
                     rumor_data = RumorCreate(
                         title=title,
-                        slug=resolved,
+                        slug=resolved.slug,
                         summary=content,
                         rumor_content=content,
                         truth_content=None,
@@ -647,8 +721,8 @@ def run_pipeline() -> PipelineSummary:
     summary.import_stats = import_candidate_jsonl(summary.candidate_file)
     s = summary.import_stats
     logger.info(
-        "Pipeline import: processed=%d succeeded=%d failed=%d duplicates=%d",
-        s.processed, s.succeeded, s.failed, s.duplicates,
+        "Pipeline import: processed=%d succeeded=%d failed=%d duplicates=%d merged=%d",
+        s.processed, s.succeeded, s.failed, s.duplicates, s.merged,
     )
     if summary.collect_failures:
         logger.warning(
@@ -656,6 +730,33 @@ def run_pipeline() -> PipelineSummary:
             len(summary.collect_failures), summary.collect_failures,
         )
     return summary
+
+
+# ─── Scheduled loop (in-process, foreground) ─────────────────────────────────
+
+def run_scheduled(*, interval_hours: float) -> int:
+    """Run ``run_pipeline()`` in a fixed-interval foreground loop.
+
+    Per-iteration exceptions are logged and swallowed so one bad run does not
+    kill the loop. Sleep is compensated by monotonic elapsed time to avoid
+    long-term drift. Ctrl+C exits cleanly.
+    """
+    import time
+    interval_s = max(60.0, interval_hours * 3600)
+    logger.info("Scheduler start: pipeline every %.2fh (Ctrl+C to stop)", interval_hours)
+    try:
+        while True:
+            started = time.monotonic()
+            try:
+                run_pipeline()
+            except Exception:
+                logger.exception("Scheduled pipeline iteration crashed; continuing")
+            sleep_s = max(0.0, interval_s - (time.monotonic() - started))
+            logger.info("Next pipeline run in %.0fs", sleep_s)
+            time.sleep(sleep_s)
+    except KeyboardInterrupt:
+        logger.info("Scheduler stopped by user")
+        return 0
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────

@@ -1,0 +1,68 @@
+{% set status_meta = {
+  'FAKE':     {'label': '虚假', 'pill': 'bg-rose-50 text-rose-700 ring-rose-200'},
+  'TRUE':     {'label': '属实', 'pill': 'bg-emerald-50 text-emerald-700 ring-emerald-200'},
+  'OUTDATED': {'label': '过时', 'pill': 'bg-stone-100 text-stone-600 ring-stone-200'},
+  'DUBIOUS':  {'label': '存疑', 'pill': 'bg-amber-50 text-amber-700 ring-amber-200'},
+} %}
+{% set meta = status_meta.get(rumor.status.value, status_meta['DUBIOUS']) %}
+
+{% set first_image = none %}
+{% set has_video = false %}
+{% if rumor.media_files %}
+  {% for m in rumor.media_files %}
+    {% if m.type == 'image' and not first_image %}{% set first_image = m %}{% endif %}
+    {% if m.type == 'video' %}{% set has_video = true %}{% endif %}
+  {% endfor %}
+{% endif %}
+
+<a
+  href="/rumors/{{ rumor.slug }}"
+  class="group flex flex-col bg-white rounded-2xl border border-stone-200/80 overflow-hidden hover:border-stone-300 hover:shadow-[0_2px_24px_-12px_rgba(28,25,23,0.18)] transition-all duration-200"
+>
+  {% if first_image %}
+  <div class="relative aspect-[16/10] overflow-hidden bg-stone-100">
+    <img src="/media/{{ first_image.path }}" alt="{{ first_image.caption }}"
+         class="w-full h-full object-cover group-hover:scale-[1.02] transition-transform duration-500">
+    {% if has_video %}
+    <span class="absolute top-3 right-3 inline-flex items-center gap-1 bg-black/55 backdrop-blur text-white text-[11px] px-2 py-0.5 rounded-full">
+      <svg class="h-3 w-3" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+      含视频
+    </span>
+    {% endif %}
+  </div>
+  {% elif has_video %}
+  <div class="aspect-[16/10] bg-gradient-to-br from-stone-100 to-stone-200 flex items-center justify-center">
+    <svg class="h-10 w-10 text-stone-400" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+  </div>
+  {% endif %}
+
+  <div class="p-5 flex-1 flex flex-col">
+    <div class="flex items-center gap-2 mb-3">
+      <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium ring-1 ring-inset {{ meta.pill }}">
+        {{ meta.label }}
+      </span>
+      <span class="text-[11px] text-stone-400">{{ rumor.created_at.strftime('%Y-%m-%d') }}</span>
+    </div>
+
+    <h3 class="font-serif text-lg font-medium leading-snug text-ink line-clamp-2 group-hover:text-stone-700 transition-colors">
+      {{ rumor.title }}
+    </h3>
+
+    {% if rumor.summary or rumor.rumor_content %}
+    <p class="mt-2 text-sm text-stone-500 leading-relaxed line-clamp-3">
+      {{ rumor.summary or rumor.rumor_content }}
+    </p>
+    {% endif %}
+
+    {% if rumor.tags %}
+    <div class="mt-4 pt-4 border-t border-stone-100 flex flex-wrap gap-1.5">
+      {% for t in rumor.tags[:3] %}
+      <span class="text-[11px] text-stone-500 bg-stone-100/80 px-2 py-0.5 rounded">#{{ t }}</span>
+      {% endfor %}
+      {% if rumor.tags | length > 3 %}
+      <span class="text-[11px] text-stone-400">+{{ rumor.tags | length - 3 }}</span>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+</a>

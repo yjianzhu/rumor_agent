@@ -295,3 +295,35 @@ def test_dry_run_detects_exact_duplicate_without_writing(tmp_path, db):
     stats = import_jsonl_file(dup_path, dry_run=True)
     assert stats.duplicates == 1
     assert stats.succeeded == 0
+
+
+# ─── Batch commit (BATCH_SIZE boundary) ──────────────────────────────────────
+
+class TestBatchCommit:
+    def test_batch_plus_one_all_imported(self, tmp_path):
+        """BATCH_SIZE + 1 records should all succeed in dry-run mode."""
+        from src.config import settings
+
+        count = settings.IMPORT_BATCH_SIZE + 1
+        rows = [{"title": f"Rumor {i}", "rumor_content": f"content {i}"} for i in range(count)]
+        path = write_jsonl(tmp_path, rows)
+
+        stats = import_jsonl_file(path, dry_run=True)
+
+        assert stats.processed == count
+        assert stats.succeeded == count
+        assert stats.failed == 0
+
+    def test_bad_record_does_not_affect_good_ones(self, tmp_path):
+        """A bad record in the middle shouldn't prevent good records from succeeding."""
+        rows = [
+            {"title": "Good 1", "rumor_content": "content"},
+            {"rumor_content": "missing title"},  # bad — missing title
+            {"title": "Good 2", "rumor_content": "content"},
+        ]
+        path = write_jsonl(tmp_path, rows)
+
+        stats = import_jsonl_file(path, dry_run=True)
+
+        assert stats.succeeded == 2
+        assert stats.failed == 1

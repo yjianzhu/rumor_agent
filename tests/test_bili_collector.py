@@ -1,14 +1,17 @@
 """Tests for Stage 1: bilibili_collector parsing & cleaning utilities."""
 
+import asyncio
 import json
 from pathlib import Path
 
 import pytest
 
+from src.ingest import bilibili_collector
 from src.ingest.bilibili_collector import (
-    strip_html,
-    normalize_url,
+    _fetch_comments_for_bvid,
     _parse_items,
+    normalize_url,
+    strip_html,
 )
 
 
@@ -68,3 +71,96 @@ class TestParseItems:
     def test_empty_result(self):
         assert _parse_items({"result": []}, keyword="x") == []
         assert _parse_items({}, keyword="x") == []
+
+
+class TestFetchComments:
+    @staticmethod
+    def _payload():
+        return {
+            "replies": [
+                {
+                    "content": {"message": "高赞质疑"},
+                    "like": 1234,
+                    "member": {"uname": "网友A"},
+                    "reply_control": {"location": "IP属地：北京"},
+                },
+                {
+                    "content": {"message": "  "},
+                    "like": 0,
+                    "member": {"uname": "空评论"},
+                },
+                {
+                    "content": {"message": "二楼评论"},
+                    "like": 50,
+                    "member": {"uname": "网友B"},
+                },
+            ],
+        }
+
+    def test_top_n_zero_skips_call(self, monkeypatch):
+        called = {"n": 0}
+
+        async def fake_get_comments(*a, **kw):
+            called["n"] += 1
+            return {}
+
+        monkeypatch.setattr(bilibili_collector.comment, "get_comments", fake_get_comments)
+        out = asyncio.run(_fetch_comments_for_bvid("BV1xx", 0))
+        assert out == []
+        assert called["n"] == 0
+
+    def test_empty_bvid(self):
+        assert asyncio.run(_fetch_comments_for_bvid("", 5)) == []
+
+    def test_parses_replies_skips_blank(self, monkeypatch):
+        async def fake_get_comments(*a, **kw):
+            return self._payload()
+
+        class FakeVideo:
+            def __init__(self, bvid):
+                pass
+
+            def get_aid(self):
+                return 12345
+
+        monkeypatch.setattr(bilibili_collector.comment, "get_comments", fake_get_comments)
+        monkeypatch.setattr(bilibili_collector.video, "Video", FakeVideo)
+
+        out = asyncio.run(_fetch_comments_for_bvid("BV1xx", 5))
+        assert len(out) == 2
+        assert out[0]["text"] == "高赞质疑"
+        assert out[0]["like"] == 1234
+        assert out[0]["author"] == "网友A"
+        assert out[0]["ip"] == "IP属地：北京"
+        assert out[1]["text"] == "二楼评论"
+
+    def test_truncates_to_top_n(self, monkeypatch):
+        async def fake_get_comments(*a, **kw):
+            return self._payload()
+
+        class FakeVideo:
+            def __init__(self, bvid):
+                pass
+
+            def get_aid(self):
+                return 1
+
+        monkeypatch.setattr(bilibili_collector.comment, "get_comments", fake_get_comments)
+        monkeypatch.setattr(bilibili_collector.video, "Video", FakeVideo)
+        out = asyncio.run(_fetch_comments_for_bvid("BV1xx", 1))
+        assert len(out) == 1
+
+    def test_returns_empty_on_exception(self, monkeypatch):
+        async def fake_get_comments(*a, **kw):
+            raise RuntimeError("network down")
+
+        class FakeVideo:
+            def __init__(self, bvid):
+                pass
+
+            def get_aid(self):
+                return 1
+
+        monkeypatch.setattr(bilibili_collector.comment, "get_comments", fake_get_comments)
+        monkeypatch.setattr(bilibili_collector.video, "Video", FakeVideo)
+        assert asyncio.run(_fetch_comments_for_bvid("BV1xx", 5)) == []

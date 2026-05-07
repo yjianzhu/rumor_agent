@@ -43,6 +43,8 @@ class Rumor(Base):
 
     # 5. Stats & Meta
     view_count = Column(Integer, default=0)
+    # Number of times this rumor absorbed a duplicate candidate (source/tag union)
+    merge_count = Column(Integer, nullable=False, server_default=text("0"))
     is_published = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     # onupdate handles ORM-level updates; a DB trigger covers raw-SQL updates (see init_db.py)

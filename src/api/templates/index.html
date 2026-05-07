@@ -8,7 +8,7 @@
   {% set tabs = [('pending', '待审核'), ('published', '已发布'), ('all', '全部')] %}
   {% for v, label in tabs %}
   <a
-    href="/?view={{ v }}{% if q %}&q={{ q }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if tag %}&tag={{ tag }}{% endif %}"
+    href="/admin?view={{ v }}{% if q %}&q={{ q }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if tag %}&tag={{ tag }}{% endif %}"
     class="px-3 py-1.5 rounded-full font-medium transition-colors duration-150 {% if view == v %}bg-indigo-600 text-white{% else %}text-slate-500 hover:text-slate-800 hover:bg-slate-100/80{% endif %}"
   >{{ label }}</a>
   {% endfor %}
@@ -23,7 +23,7 @@
       placeholder="搜索标题 / 内容..."
       value="{{ q or '' }}"
       class="flex-1 min-w-[200px] rounded-lg bg-slate-50/50 border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-300 transition-all duration-150"
-      hx-get="/partials/rumors"
+      hx-get="/admin/partials/rumors"
       hx-trigger="input changed delay:300ms, search"
       hx-target="#rumor-list"
       hx-include="[name='status'],[name='tag'],[name='view']"
@@ -33,7 +33,7 @@
     <select
       name="status"
       class="rounded-lg bg-slate-50/50 border border-slate-200 px-3 py-2 text-sm appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-300 transition-all duration-150"
-      hx-get="/partials/rumors"
+      hx-get="/admin/partials/rumors"
       hx-trigger="change"
       hx-target="#rumor-list"
       hx-include="[name='q'],[name='tag'],[name='view']"
@@ -48,7 +48,7 @@
     <select
       name="tag"
       class="rounded-lg bg-slate-50/50 border border-slate-200 px-3 py-2 text-sm appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-300 transition-all duration-150"
-      hx-get="/partials/rumors"
+      hx-get="/admin/partials/rumors"
       hx-trigger="change"
       hx-target="#rumor-list"
       hx-include="[name='q'],[name='status'],[name='view']"
@@ -72,7 +72,7 @@
 </div>
 
 <!-- Stats bar -->
-<div id="stats-bar" hx-get="/partials/stats" hx-trigger="load" hx-swap="innerHTML">
+<div id="stats-bar" hx-get="/admin/partials/stats" hx-trigger="load" hx-swap="innerHTML">
   {% include "partials/stats_bar.html" %}
 </div>
 

@@ -92,6 +92,7 @@ class RumorOut(BaseModel):
     media_files: list[MediaItem] | None
     source_urls: list[str] | None
     view_count: int
+    merge_count: int = 0
     is_published: bool
     created_at: datetime
     updated_at: datetime

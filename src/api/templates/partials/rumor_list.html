@@ -13,7 +13,7 @@
 {% if has_more %}
 <button
   class="col-span-full mx-auto mt-2 px-6 py-2 text-sm font-medium text-slate-600 bg-white border border-slate-200 rounded-full shadow-sm hover:shadow hover:bg-slate-50 transition-all duration-150"
-  hx-get="/partials/rumors?offset={{ next_offset }}&limit={{ limit }}{% if q %}&q={{ q }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if tag %}&tag={{ tag }}{% endif %}{% if view %}&view={{ view }}{% endif %}"
+  hx-get="/admin/partials/rumors?offset={{ next_offset }}&limit={{ limit }}{% if q %}&q={{ q }}{% endif %}{% if status %}&status={{ status }}{% endif %}{% if tag %}&tag={{ tag }}{% endif %}{% if view %}&view={{ view }}{% endif %}"
   hx-target="this"
   hx-swap="outerHTML"
 >

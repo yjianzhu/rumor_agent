@@ -1,9 +1,8 @@
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
-from src.api.deps import get_db_session, TEMPLATES_DIR, resolve_view
+from src.api.deps import get_db_session, make_templates, resolve_view
 from src.db.crud import (
     count_by_status,
     count_published,
@@ -16,7 +15,7 @@ from src.db.crud import (
 )
 from src.db.models import RumorStatus
 
-templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+templates = make_templates()
 
 router = APIRouter()
 
@@ -32,7 +31,7 @@ def _build_stats(db: Session) -> dict:
     }
 
 
-@router.get("/", response_class=HTMLResponse)
+@router.get("/admin", response_class=HTMLResponse)
 def index(
     request: Request,
     q: str = "",
@@ -76,7 +75,7 @@ def index(
     })
 
 
-@router.get("/rumors/{slug}", response_class=HTMLResponse)
+@router.get("/admin/rumors/{slug}", response_class=HTMLResponse)
 def detail(
     request: Request,
     slug: str,

@@ -11,7 +11,7 @@ import json
 import logging
 import random
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -110,9 +110,8 @@ def _search_feeds(
     filters: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     arguments: dict[str, Any] = {"keyword": keyword}
-    mcp_filters = {k: v for k, v in (filters or {}).items() if k != "publish_time"}
-    if mcp_filters:
-        arguments["filters"] = mcp_filters
+    if filters:
+        arguments["filters"] = filters
     text = _mcp_tool_call(
         url, headers, "search_feeds", arguments,
         request_id="search", timeout=60,
@@ -122,56 +121,35 @@ def _search_feeds(
     except json.JSONDecodeError:
         logger.warning("search_feeds returned non-JSON: %s", text[:200])
         return []
-    return _apply_local_filters(payload.get("feeds", []), filters)
+    return payload.get("feeds", [])
 
 
-def _apply_local_filters(
-    feeds: list[dict[str, Any]],
-    filters: dict[str, str] | None,
-) -> list[dict[str, Any]]:
-    if not filters:
-        return feeds
+def _extract_comments(data: dict[str, Any], top_n: int) -> list[dict[str, Any]]:
+    """Extract top-N first-level comments from a get_feed_detail payload's ``data`` dict.
 
-    publish_time = filters.get("publish_time")
-    if publish_time and publish_time != "不限":
-        threshold = _publish_time_threshold(publish_time)
-        if threshold is not None:
-            feeds = [feed for feed in feeds if (ts := _note_created_at(feed)) and ts >= threshold]
-
-    sort_by = filters.get("sort_by")
-    if sort_by == "最新":
-        feeds = sorted(feeds, key=lambda feed: _note_created_at(feed) or datetime.min, reverse=True)
-    elif sort_by in {"最多点赞", "最多评论", "最多收藏"}:
-        key_map = {
-            "最多点赞": "likedCount",
-            "最多评论": "commentCount",
-            "最多收藏": "collectedCount",
-        }
-        feeds = sorted(feeds, key=lambda feed: _count_metric(feed, key_map[sort_by]), reverse=True)
-
-    return feeds
-
-
-def _publish_time_threshold(publish_time: str) -> datetime | None:
-    days = {"一天内": 1, "一周内": 7, "半年内": 183}.get(publish_time)
-    return datetime.now() - timedelta(days=days) if days is not None else None
-
-
-def _note_created_at(feed: dict[str, Any]) -> datetime | None:
-    note_id = str(feed.get("id", ""))
-    try:
-        return datetime.fromtimestamp(int(note_id[:8], 16))
-    except (OSError, OverflowError, ValueError):
-        return None
-
-
-def _count_metric(feed: dict[str, Any], key: str) -> int:
-    value = feed.get("noteCard", {}).get("interactInfo", {}).get(key, 0)
-    text = str(value or 0).replace(",", "").strip()
-    try:
-        return int(float(text[:-1]) * 10000) if text.endswith("万") else int(text)
-    except ValueError:
-        return 0
+    Comments live under ``data.comments.list`` (sibling of ``data.note``), not
+    under ``data.note.comments``. With load_all_comments=False the MCP returns
+    up to 10 first-level comments, which matches our default top_n=10.
+    """
+    if top_n <= 0:
+        return []
+    raw = (data.get("comments") or {}).get("list") or []
+    out: list[dict[str, Any]] = []
+    for item in raw[:top_n]:
+        text = (item.get("content") or "").strip()
+        if not text:
+            continue
+        try:
+            like = int(item.get("likeCount") or 0)
+        except (TypeError, ValueError):
+            like = 0
+        out.append({
+            "text": text,
+            "like": like,
+            "author": (item.get("userInfo") or {}).get("nickname", ""),
+            "ip": item.get("ipLocation", ""),
+        })
+    return out
 
 
 def _fetch_detail(
@@ -180,10 +158,16 @@ def _fetch_detail(
     feed_id: str,
     xsec_token: str,
     *,
+    comment_top_n: int = 0,
     max_retries: int | None = None,
     retry_delay_range: tuple[float, float] | None = None,
-) -> str:
-    """Fetch note detail with retry logic. Returns desc text or empty string."""
+) -> tuple[str, list[dict[str, Any]]]:
+    """Fetch note detail with retry. Returns (desc, comments).
+
+    Always uses load_all_comments=False — it returns up to 10 first-level
+    comments which covers our default. Setting True triggers XHS anti-bot
+    on hot notes and risks losing desc too. N>10 isn't supported here.
+    """
     retries = max_retries if max_retries is not None else settings.XHS_MAX_RETRIES
     delay_range = retry_delay_range or settings.XHS_RETRY_DELAY_RANGE
 
@@ -210,18 +194,17 @@ def _fetch_detail(
         except json.JSONDecodeError:
             obj = {}
 
-        desc = (
-            obj.get("data", {}).get("note", {}).get("desc", "")
-            or obj.get("data", {}).get("note", {}).get("title", "")
-        )
+        data = obj.get("data", {})
+        note = data.get("note", {})
+        desc = note.get("desc", "") or note.get("title", "")
         if desc:
-            return desc
+            return desc, _extract_comments(data, comment_top_n)
 
         logger.debug("[%s] empty desc (attempt %d/%d)", feed_id, attempt, retries)
         if attempt < retries:
             time.sleep(random.uniform(*delay_range))
 
-    return ""
+    return "", []
 
 
 def build_note_url(note_id: str, xsec_token: str) -> str:
@@ -250,6 +233,7 @@ def parse_feed(
         "keyword": keyword,
         "title": note_card.get("displayTitle", ""),
         "description": "",
+        "comments": [],
         "source_url": build_note_url(note_id, xsec_token),
         "note_id": note_id,
         "xsec_token": xsec_token,
@@ -278,10 +262,11 @@ def collect_xhs(
     mcp_url = settings.XHS_MCP_URL
     items_limit = max_items if max_items is not None else settings.XHS_MAX_ITEMS
     delay_range = settings.XHS_DELAY_RANGE
+    comment_top_n = settings.XHS_COMMENT_TOP_N
 
     logger.info(
-        "XHS collect: keyword=%r filters=%s max_items=%d delay=%.1f~%.1f",
-        keyword, filters, items_limit, delay_range[0], delay_range[1],
+        "XHS collect: keyword=%r filters=%s max_items=%d delay=%.1f~%.1f comment_top_n=%d",
+        keyword, filters, items_limit, delay_range[0], delay_range[1], comment_top_n,
     )
 
     headers, session_id = _mcp_init(mcp_url)
@@ -303,8 +288,12 @@ def collect_xhs(
         row = parse_feed(feed, keyword=keyword, rank_offset=idx)
 
         if row["note_id"] and row.get("xsec_token"):
-            desc = _fetch_detail(mcp_url, headers, row["note_id"], row["xsec_token"])
+            desc, comments = _fetch_detail(
+                mcp_url, headers, row["note_id"], row["xsec_token"],
+                comment_top_n=comment_top_n,
+            )
             row["description"] = desc
+            row["comments"] = comments
             time.sleep(random.uniform(*delay_range))
 
         rows.append(row)

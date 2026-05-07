@@ -23,7 +23,9 @@ if media_path.exists():
 from src.api.page_routes import router as page_router
 from src.api.partial_routes import router as partial_router
 from src.api.api_routes import router as api_router
+from src.api.public_routes import router as public_router
 
 app.include_router(api_router)
 app.include_router(partial_router)
 app.include_router(page_router)
+app.include_router(public_router)

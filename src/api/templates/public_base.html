@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="h-full">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}辟谣 · Rumor Agent{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Noto+Serif+SC:wght@500;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+            serif: ['"Noto Serif SC"', 'ui-serif', 'Georgia', 'serif'],
+          },
+          colors: {
+            paper: '#fbfaf7',
+            ink:   '#1c1917',
+          },
+        },
+      },
+    }
+  </script>
+  <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+  <style>
+    [htmx-indicator] { display: none; }
+    .htmx-request [htmx-indicator] { display: inline-flex; }
+    @keyframes fadeUp { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+    .htmx-added { animation: fadeUp 0.25s ease-out; }
+
+    /* markdown 渲染区域 — 配合 deps.render_markdown */
+    .markdown-body { color: inherit; line-height: 1.85; }
+    .markdown-body > * + * { margin-top: 0.85em; }
+    .markdown-body h1, .markdown-body h2, .markdown-body h3, .markdown-body h4 {
+      font-family: 'Noto Serif SC', ui-serif, Georgia, serif;
+      font-weight: 600; line-height: 1.35; color: #1c1917;
+      margin-top: 1.6em;
+    }
+    .markdown-body h1 { font-size: 1.4em; }
+    .markdown-body h2 { font-size: 1.2em; }
+    .markdown-body h3 { font-size: 1.05em; }
+    .markdown-body h4 { font-size: 1em; }
+    .markdown-body p { margin: 0; }
+    .markdown-body strong { color: #1c1917; font-weight: 600; }
+    .markdown-body em { font-style: italic; }
+    .markdown-body a { color: #0c4a6e; text-decoration: underline; text-underline-offset: 3px; text-decoration-color: #cbd5e1; }
+    .markdown-body a:hover { text-decoration-color: #64748b; }
+    .markdown-body ul, .markdown-body ol { padding-left: 1.4em; }
+    .markdown-body ul { list-style: disc; }
+    .markdown-body ol { list-style: decimal; }
+    .markdown-body li + li { margin-top: 0.3em; }
+    .markdown-body blockquote {
+      border-left: 3px solid #d6d3d1; padding: 0.1em 0.9em; color: #57534e;
+      background: rgba(245, 245, 244, 0.6); border-radius: 0 0.4em 0.4em 0;
+    }
+    .markdown-body code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.88em; background: #f5f5f4; padding: 0.15em 0.4em;
+      border-radius: 0.3em; color: #44403c;
+    }
+    .markdown-body pre {
+      background: #1c1917; color: #fafaf9; padding: 0.9em 1em;
+      border-radius: 0.6em; overflow-x: auto; font-size: 0.85em; line-height: 1.6;
+    }
+    .markdown-body pre code { background: transparent; padding: 0; color: inherit; }
+    .markdown-body hr { border: none; border-top: 1px solid #e7e5e4; margin: 1.6em 0; }
+    .markdown-body table {
+      width: 100%; border-collapse: collapse; font-size: 0.92em;
+    }
+    .markdown-body th, .markdown-body td {
+      border: 1px solid #e7e5e4; padding: 0.5em 0.7em; text-align: left;
+    }
+    .markdown-body th { background: #fafaf9; font-weight: 600; }
+  </style>
+</head>
+<body class="h-full bg-paper text-ink antialiased selection:bg-amber-200/60">
+  <header class="border-b border-stone-200/80">
+    <div class="max-w-6xl mx-auto px-5 sm:px-8 h-16 flex items-center justify-between">
+      <a href="/" class="flex items-baseline gap-2 group">
+        <span class="font-serif text-xl font-bold tracking-tight text-ink group-hover:text-stone-700 transition-colors">辟谣</span>
+        <span class="text-[11px] uppercase tracking-[0.2em] text-stone-400">Rumor Agent</span>
+      </a>
+      <nav class="flex items-center gap-6 text-sm">
+        <a href="/" class="text-stone-600 hover:text-ink transition-colors">谣言库</a>
+        <a href="/admin" class="text-stone-400 hover:text-stone-600 transition-colors text-xs">审核台</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="mt-24 border-t border-stone-200/80">
+    <div class="max-w-6xl mx-auto px-5 sm:px-8 py-8 text-xs text-stone-400 flex justify-between">
+      <span>对争议性信息的人工核查记录</span>
+      <span>· 数据仅供参考 ·</span>
+    </div>
+  </footer>
+</body>
+</html>

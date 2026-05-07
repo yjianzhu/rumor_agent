@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from src.ingest.triage import _is_noise, _parse_events
+from src.ingest.triage import _build_llm_input, _format_comments, _is_noise, _parse_events
 
 
 class TestIsNoise:
@@ -210,3 +210,39 @@ class TestTriageRawJsonl:
         assert out.exists()
         content = out.read_text(encoding="utf-8").strip()
         assert content == ""
+
+
+class TestFormatComments:
+    def test_skips_blank_text(self):
+        out = _format_comments([
+            {"text": "  ", "like": 5, "author": "X"},
+            {"text": "实质评论", "like": 10, "author": "Y"},
+        ])
+        assert out == ["Y(👍10): 实质评论"]
+
+    def test_anonymous_fallback(self):
+        out = _format_comments([{"text": "t", "like": 0, "author": ""}])
+        assert out == ["匿名(👍0): t"]
+
+    def test_non_list_returns_empty(self):
+        assert _format_comments(None) == []
+        assert _format_comments("nope") == []
+
+
+class TestBuildLLMInput:
+    def test_includes_comments_field(self):
+        records = [{
+            "title": "t",
+            "description": "d",
+            "arcurl": "https://b.com/1",
+            "author": "作者",
+            "rank_meta": {"play": 1000},
+            "comments": [{"text": "评论A", "like": 5, "author": "用户"}],
+        }]
+        payload = json.loads(_build_llm_input(records, keyword="kw"))
+        assert payload["items"][0]["comments"] == ["用户(👍5): 评论A"]
+
+    def test_missing_comments_serializes_empty(self):
+        records = [{"title": "t", "description": "d", "arcurl": "https://b.com/1"}]
+        payload = json.loads(_build_llm_input(records))
+        assert payload["items"][0]["comments"] == []
