@@ -84,6 +84,7 @@
     hx-post="/admin/partials/rumors/{{ rumor.slug }}/review"
     hx-target="#rumor-article"
     hx-swap="outerHTML"
+    onsubmit="return window.rumorReviewConfirm ? window.rumorReviewConfirm(this) : true"
   >
     <h2 class="text-xs font-medium uppercase tracking-widest text-slate-400">人工审核</h2>
 
@@ -103,6 +104,7 @@
       <label class="block text-sm text-slate-600">
         <span class="block mb-1 text-xs text-slate-500">摘要</span>
         <textarea name="summary" rows="2"
+          data-original="{{ rumor.summary or '' }}"
           class="w-full rounded-lg bg-slate-50/50 border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-300 leading-relaxed"
           placeholder="可选 — 一句话概括">{{ rumor.summary or '' }}</textarea>
       </label>
@@ -110,6 +112,7 @@
       <label class="block text-sm text-slate-600">
         <span class="block mb-1 text-xs text-slate-500">谣言内容</span>
         <textarea name="rumor_content" rows="6"
+          data-original="{{ rumor.rumor_content or '' }}"
           class="w-full rounded-lg bg-slate-50/50 border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-300 leading-relaxed font-mono text-[13px]"
           placeholder="谣言原文 — 修订错别字 / 删去无关内容">{{ rumor.rumor_content or '' }}</textarea>
       </label>
@@ -140,6 +143,7 @@
       <label class="block text-sm text-slate-600">
         <span class="block mb-1 text-xs text-slate-500">真相 / 辟谣文</span>
         <textarea name="truth_content" rows="4"
+          data-original="{{ rumor.truth_content or '' }}"
           class="w-full rounded-lg bg-slate-50/50 border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-300 leading-relaxed"
           placeholder="人工核查后的真相说明...">{{ rumor.truth_content or '' }}</textarea>
       </label>

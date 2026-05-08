@@ -787,6 +787,10 @@ def _safe_get_embedding(text: str) -> list[float] | None:
 
 
 def _resolve_llm_model_name(model: str | None = None) -> str:
+    # 注意：返回的是「优先 endpoint」的 model 名，并不一定是实际命中的 endpoint——
+    # 如果 analyzer 走了 fallback 链路，DB 里记的 model_name 会与真实调用不一致。
+    # 当前仅作为人类可读的近似值；如果未来需要精确审计，让 analyze_sample 把命中的
+    # endpoint 一并返回。
     first_endpoint = settings.llm_endpoint_list[0] if settings.llm_endpoint_list else None
     return model or (first_endpoint.model if first_endpoint else None) or settings.LLM_MODEL
 

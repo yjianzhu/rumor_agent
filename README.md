@@ -126,6 +126,115 @@ uv run python init_db.py
 
 > 当前阶段不使用 Alembic。schema 变更走 drop & recreate 流程。
 
+## 数据迁移 / 备份恢复
+
+迁移一套完整站点数据必须同时迁移两部分：
+
+- PostgreSQL 数据库：`rumors`、`analysis_results`、embedding、JSONB 媒体引用等。
+- 图片目录：默认是仓库根目录下的 `media/`，路径由 `config.toml` 的 `[general].media_dir` 控制。
+
+数据库中不保存图片二进制，只保存相对 `MEDIA_DIR` 的路径，例如：
+
+```json
+{"type": "image", "path": "<slug>/xxx.jpg", "label": "rumor", "caption": "网传截图"}
+```
+
+前台访问时会渲染为 `/media/<slug>/xxx.jpg`，FastAPI 再映射到本机磁盘的 `MEDIA_DIR`。
+
+### 1. 源机器备份
+
+导出数据库：
+
+```powershell
+pg_dump -U rad_user -h localhost -p 5432 -d rumor_agent_db -Fc -f rumor_agent_db.dump
+```
+
+打包图片目录：
+
+```powershell
+Compress-Archive -Path media -DestinationPath media.zip
+```
+
+如果 `config.toml` 里改过 `media_dir`，请打包实际目录，而不是固定打包 `media/`。
+
+### 2. 目标机器准备数据库
+
+目标 PostgreSQL 必须具备两个扩展：
+
+- `uuid-ossp`：生成 UUID 主键。
+- `vector`：pgvector，用于 embedding 字段和语义去重。
+
+先创建用户和数据库。若用户已存在，可跳过第一行：
+
+```powershell
+psql -U postgres -c "CREATE USER rad_user WITH PASSWORD 'your_password';"
+psql -U postgres -c "CREATE DATABASE rumor_agent_db OWNER rad_user;"
+```
+
+再在目标库启用扩展：
+
+```powershell
+psql -U postgres -d rumor_agent_db -c "CREATE EXTENSION IF NOT EXISTS ""uuid-ossp""; CREATE EXTENSION IF NOT EXISTS vector;"
+```
+
+检查扩展是否齐全：
+
+```powershell
+psql -U postgres -d rumor_agent_db -c "SELECT extname FROM pg_extension WHERE extname IN ('uuid-ossp', 'vector');"
+```
+
+结果应同时包含 `uuid-ossp` 和 `vector`。如果 `vector` 报错不存在，需要先在目标 PostgreSQL 安装 pgvector，再执行 `CREATE EXTENSION`。
+
+### 3. 目标机器恢复数据
+
+恢复数据库：
+
+```powershell
+pg_restore -U rad_user -h localhost -p 5432 -d rumor_agent_db rumor_agent_db.dump
+```
+
+解压图片目录到项目根目录：
+
+```powershell
+Expand-Archive -Path media.zip -DestinationPath .
+```
+
+确保目标机器 `config.toml` 指向同一个图片根目录：
+
+```toml
+[general]
+media_dir = "media"
+```
+
+如果图片放到独立磁盘，例如 `D:\rumor_media`，则配置：
+
+```toml
+[general]
+media_dir = "D:\\rumor_media"
+```
+
+这种情况下，数据库里的 `media_files[].path` 不需要改；只要保持 `<slug>/<filename>` 这层相对路径在新的 `media_dir` 下存在即可。
+
+### 4. 恢复后验证
+
+检查数据库连接和记录数：
+
+```powershell
+uv run python -m src.main
+```
+
+启动 Web：
+
+```powershell
+uv run uvicorn src.api.app:app --reload
+```
+
+打开公开详情页，确认：
+
+- 谣言记录能正常访问。
+- `/media/<slug>/<filename>` 图片能打开。
+- `config.toml` 的数据库账号、密码、库名和 `media_dir` 与目标环境一致。
+
 ## 命令
 
 ### 采集（Stage 1）

@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Rumor Agent{% endblock %}</title>
+  <link rel="icon" type="image/png" href="/static/logo.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -71,6 +72,25 @@
     }
     .markdown-body th { background: #f8fafc; font-weight: 600; }
   </style>
+  <script>
+    // 审核表单清空保护：reviewer 只想 toggle 发布状态时若误清空非空字段，弹确认。
+    // 由 form 的 onsubmit 触发，textarea 上 data-original 存原值。
+    window.rumorReviewConfirm = function (form) {
+      const labels = { rumor_content: '谣言内容', truth_content: '真相 / 辟谣文', summary: '摘要' };
+      for (const name of Object.keys(labels)) {
+        const el = form.elements[name];
+        if (!el) continue;
+        const original = (el.dataset.original || '').trim();
+        const current = (el.value || '').trim();
+        if (original && !current) {
+          if (!confirm('确认清空「' + labels[name] + '」？该字段当前不为空，提交后会被覆盖为空。')) {
+            return false;
+          }
+        }
+      }
+      return true;
+    };
+  </script>
 </head>
 <body class="h-full bg-slate-50 text-slate-800 antialiased">
   <!-- Nav -->

@@ -252,13 +252,9 @@ def test_jsonl_duplicate_slug_skipped(tmp_path, db):
 
 
 def test_md_import_creates_rumor_and_analysis(tmp_path, db, monkeypatch):
-    monkeypatch.setattr(
-        "src.main.settings",
-        type("S", (), {
-            "llm_endpoint_list": [ApiEndpoint(model="gpt-5.4")],
-            "LLM_MODEL": "openai/gpt-4o-mini",
-        })(),
-    )
+    from src.main import settings
+
+    monkeypatch.setattr(settings, "LLM_ENDPOINTS", [ApiEndpoint(model="gpt-5.4")])
     title = f"md-import-{uuid4().hex[:8]}"
     md_content = "Officials clearly debunked this rumor."
     md = write_md(tmp_path, md_content, filename=f"{title}.md")

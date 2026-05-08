@@ -54,17 +54,22 @@ def split_media(media_files):
     """Split a list of MediaItem-like objects into (images, videos).
 
     Each video item is augmented to a dict with `url`, `caption`, `platform`.
-    Images keep their `path` and `caption` shape for template use.
+    Images keep their `path` and `caption` shape for template use, with `label`
+    normalized to either ``"rumor"`` or ``"debunk"``: anything that is not
+    explicitly ``"rumor"`` (空 label、历史 ``"evidence"``、未来未识别 label)
+    一律归入 ``"debunk"``，避免老数据丢失展示。
     """
     images = []
     videos = []
     for item in media_files or []:
         media_type = _media_value(item, "type")
         if media_type == "image":
+            raw_label = _media_value(item, "label")
+            label = "rumor" if raw_label == "rumor" else "debunk"
             images.append({
                 "path": _media_value(item, "path"),
                 "caption": _media_value(item, "caption"),
-                "label": _media_value(item, "label"),
+                "label": label,
             })
         elif media_type == "video":
             path = _media_value(item, "path")

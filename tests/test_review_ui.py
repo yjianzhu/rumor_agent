@@ -129,7 +129,9 @@ class TestReviewFormPartial:
         assert r.status_code == 400
 
     def test_media_upload_stores_selected_label(self, client, dubious_rumor, db, tmp_path, monkeypatch):
-        monkeypatch.setattr("src.media.settings", type("S", (), {"MEDIA_DIR": str(tmp_path)})())
+        from src.media import settings as media_settings
+
+        monkeypatch.setattr(media_settings, "MEDIA_DIR", str(tmp_path))
         image = BytesIO()
         Image.new("RGB", (1, 1), color="white").save(image, format="PNG")
         image.seek(0)

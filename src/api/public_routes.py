@@ -117,8 +117,9 @@ def public_detail(
         raise HTTPException(status_code=404, detail="Rumor not found")
 
     images, videos = split_media(rumor.media_files)
+    # split_media 已经把 label 归一化成 rumor / debunk，这里直接正向白名单。
     rumor_images = [img for img in images if img["label"] == "rumor"]
-    debunk_images = [img for img in images if img["label"] != "rumor"]
+    debunk_images = [img for img in images if img["label"] == "debunk"]
     return templates.TemplateResponse(request, "public_detail.html", {
         "rumor": rumor,
         "analysis": rumor.analysis,
