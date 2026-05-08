@@ -42,9 +42,17 @@ class RumorUpdate(BaseModel):
 class RumorReviewIn(BaseModel):
     """Narrow PATCH payload for the manual review workflow.
 
-    Only these three fields can be written by the review UI. PATCH semantics:
-    a field is updated only if explicitly present in the request body.
+    Two editable groups:
+      - Content fixes:  title, summary, rumor_content (typo / wording cleanup)
+      - Verdict:        status, truth_content, is_published
+
+    PATCH semantics: a field is updated only if explicitly present in the
+    request body. ``title`` rejects empty strings to keep the NOT NULL
+    constraint on ``rumors.title`` honored.
     """
+    title: str | None = Field(default=None, min_length=1)
+    summary: str | None = None
+    rumor_content: str | None = None
     status: RumorStatus | None = None
     truth_content: str | None = None
     is_published: bool | None = None
@@ -52,7 +60,10 @@ class RumorReviewIn(BaseModel):
     @model_validator(mode="after")
     def _at_least_one_field(self):
         if not self.model_fields_set:
-            raise ValueError("Request body must include at least one of: status, truth_content, is_published")
+            raise ValueError(
+                "Request body must include at least one of: "
+                "title, summary, rumor_content, status, truth_content, is_published"
+            )
         return self
 
 

@@ -36,8 +36,9 @@ def dubious_rumor(db):
 class TestReviewFormPartial:
     def test_form_submit_updates_rumor_and_returns_partial(self, client, dubious_rumor):
         r = client.post(
-            f"/partials/rumors/{dubious_rumor.slug}/review",
+            f"/admin/partials/rumors/{dubious_rumor.slug}/review",
             data={
+                "title": dubious_rumor.title,
                 "status": "FAKE",
                 "truth_content": "Officials confirmed it is fabricated.",
                 "is_published": "1",
@@ -54,41 +55,76 @@ class TestReviewFormPartial:
     def test_unchecked_is_published_treated_as_false(self, client, dubious_rumor):
         # First publish
         client.post(
-            f"/partials/rumors/{dubious_rumor.slug}/review",
-            data={"status": "FAKE", "truth_content": "x", "is_published": "1"},
+            f"/admin/partials/rumors/{dubious_rumor.slug}/review",
+            data={
+                "title": dubious_rumor.title,
+                "status": "FAKE",
+                "truth_content": "x",
+                "is_published": "1",
+            },
         )
         # Then submit without is_published checkbox (form omits unchecked boxes)
         r = client.post(
-            f"/partials/rumors/{dubious_rumor.slug}/review",
-            data={"status": "FAKE", "truth_content": "x"},
+            f"/admin/partials/rumors/{dubious_rumor.slug}/review",
+            data={
+                "title": dubious_rumor.title,
+                "status": "FAKE",
+                "truth_content": "x",
+            },
         )
         assert r.status_code == 200
         assert "未发布" in r.text
 
     def test_unknown_slug_returns_404(self, client):
         r = client.post(
-            "/partials/rumors/no-such-slug/review",
-            data={"status": "FAKE"},
+            "/admin/partials/rumors/no-such-slug/review",
+            data={"title": "anything", "status": "FAKE"},
         )
         assert r.status_code == 404
 
     def test_invalid_status_rejected(self, client, dubious_rumor):
         r = client.post(
-            f"/partials/rumors/{dubious_rumor.slug}/review",
-            data={"status": "BOGUS"},
+            f"/admin/partials/rumors/{dubious_rumor.slug}/review",
+            data={"title": dubious_rumor.title, "status": "BOGUS"},
         )
         # FastAPI Form validation does not enforce enum, but RumorStatus(...) raises ValueError →
         # caught as 500 unless we wrap. We accept 500/422 either way: reject.
         assert r.status_code >= 400
 
     def test_get_detail_partial_returns_form(self, client, dubious_rumor):
-        r = client.get(f"/partials/rumors/{dubious_rumor.slug}")
+        r = client.get(f"/admin/partials/rumors/{dubious_rumor.slug}")
         assert r.status_code == 200
         html = r.text
         assert 'id="rumor-article"' in html
+        assert 'name="title"' in html
+        assert 'name="summary"' in html
+        assert 'name="rumor_content"' in html
         assert 'name="status"' in html
         assert 'name="truth_content"' in html
         assert 'name="is_published"' in html
+
+    def test_form_submit_updates_content_fields(self, client, dubious_rumor):
+        r = client.post(
+            f"/admin/partials/rumors/{dubious_rumor.slug}/review",
+            data={
+                "title": "Title After Edit",
+                "summary": "edited summary line",
+                "rumor_content": "Edited rumor body.",
+                "status": "DUBIOUS",
+            },
+        )
+        assert r.status_code == 200
+        html = r.text
+        assert "Title After Edit" in html
+        assert "edited summary line" in html
+        assert "Edited rumor body." in html
+
+    def test_form_blank_title_rejected(self, client, dubious_rumor):
+        r = client.post(
+            f"/admin/partials/rumors/{dubious_rumor.slug}/review",
+            data={"title": "   ", "status": "DUBIOUS"},
+        )
+        assert r.status_code == 400
 
 
 class TestViewFilter:
@@ -107,7 +143,7 @@ class TestViewFilter:
         ))
         db.commit()
 
-        r = client.get("/?tag=__viewprobe__")  # default view=pending
+        r = client.get("/admin?tag=__viewprobe__")  # default view=pending
         assert r.status_code == 200
         assert slug_pending in r.text
         assert slug_published not in r.text
@@ -127,7 +163,7 @@ class TestViewFilter:
         ))
         db.commit()
 
-        r = client.get("/?view=published&tag=__viewprobe__")
+        r = client.get("/admin?view=published&tag=__viewprobe__")
         assert r.status_code == 200
         assert slug_published in r.text
         assert slug_pending not in r.text
@@ -147,16 +183,16 @@ class TestViewFilter:
         ))
         db.commit()
 
-        r = client.get("/?view=all&tag=__viewprobe__")
+        r = client.get("/admin?view=all&tag=__viewprobe__")
         assert r.status_code == 200
         assert slug_pending in r.text
         assert slug_published in r.text
 
     def test_invalid_view_falls_back_to_pending(self, client, dubious_rumor):
-        r = client.get("/?view=garbage&tag=__viewprobe__")
+        r = client.get("/admin?view=garbage&tag=__viewprobe__")
         assert r.status_code == 200
         # Active tab should be 'pending'
-        assert 'href="/?view=pending' in r.text
+        assert 'href="/admin?view=pending' in r.text
         # The pending tab link itself reads as the active state when view=pending
         assert dubious_rumor.slug in r.text  # dubious_rumor is unpublished, included
 

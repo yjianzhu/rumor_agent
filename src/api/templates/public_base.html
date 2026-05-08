@@ -74,14 +74,22 @@
       border: 1px solid #e7e5e4; padding: 0.5em 0.7em; text-align: left;
     }
     .markdown-body th { background: #fafaf9; font-weight: 600; }
+    .site-bg {
+      background:
+        linear-gradient(rgba(251, 250, 247, 0.88), rgba(251, 250, 247, 0.94)),
+        url("/static/bg.jpeg") center top / cover fixed no-repeat;
+    }
   </style>
 </head>
-<body class="h-full bg-paper text-ink antialiased selection:bg-amber-200/60">
-  <header class="border-b border-stone-200/80">
+<body class="min-h-full bg-paper text-ink antialiased selection:bg-amber-200/60 site-bg">
+  <header class="border-b border-stone-200/80 bg-paper/85 backdrop-blur">
     <div class="max-w-6xl mx-auto px-5 sm:px-8 h-16 flex items-center justify-between">
-      <a href="/" class="flex items-baseline gap-2 group">
-        <span class="font-serif text-xl font-bold tracking-tight text-ink group-hover:text-stone-700 transition-colors">辟谣</span>
-        <span class="text-[11px] uppercase tracking-[0.2em] text-stone-400">Rumor Agent</span>
+      <a href="/" class="flex items-center gap-3 group">
+        <img src="/static/logo.png" alt="辟谣" class="h-10 w-10 shrink-0 object-contain">
+        <span class="flex flex-col leading-tight">
+          <span class="font-serif text-xl font-bold tracking-tight text-ink group-hover:text-stone-700 transition-colors">辟谣</span>
+          <span class="text-[11px] uppercase tracking-[0.2em] text-stone-400">Rumor Agent</span>
+        </span>
       </a>
       <nav class="flex items-center gap-6 text-sm">
         <a href="/" class="text-stone-600 hover:text-ink transition-colors">谣言库</a>

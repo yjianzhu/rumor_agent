@@ -80,37 +80,70 @@
 
   <!-- Review form -->
   <form
-    class="border-t border-slate-200/60 pt-6 space-y-4"
+    class="border-t border-slate-200/60 pt-6 space-y-5"
     hx-post="/admin/partials/rumors/{{ rumor.slug }}/review"
     hx-target="#rumor-article"
     hx-swap="outerHTML"
   >
     <h2 class="text-xs font-medium uppercase tracking-widest text-slate-400">人工审核</h2>
 
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-      <label class="text-sm text-slate-600">
-        <span class="block mb-1 text-xs text-slate-500">状态</span>
-        <select name="status" class="w-full rounded-lg bg-slate-50/50 border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-300">
-          {% for s in ['FAKE', 'TRUE', 'DUBIOUS', 'OUTDATED'] %}
-          <option value="{{ s }}" {% if rumor.status.value == s %}selected{% endif %}>{{ s }}</option>
-          {% endfor %}
-        </select>
+    <!-- Content fixes -->
+    <fieldset class="space-y-3">
+      <legend class="text-xs font-medium text-slate-500 mb-1">内容修订</legend>
+
+      <label class="block text-sm text-slate-600">
+        <span class="block mb-1 text-xs text-slate-500">标题</span>
+        <input
+          type="text" name="title" required
+          value="{{ rumor.title }}"
+          class="w-full rounded-lg bg-slate-50/50 border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-300"
+        >
       </label>
 
-      <label class="text-sm text-slate-600 md:col-span-2 flex items-end gap-3">
-        <span class="flex items-center gap-2">
-          <input type="checkbox" name="is_published" value="1" {% if rumor.is_published %}checked{% endif %} class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500/30">
-          <span>发布</span>
-        </span>
+      <label class="block text-sm text-slate-600">
+        <span class="block mb-1 text-xs text-slate-500">摘要</span>
+        <textarea name="summary" rows="2"
+          class="w-full rounded-lg bg-slate-50/50 border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-300 leading-relaxed"
+          placeholder="可选 — 一句话概括">{{ rumor.summary or '' }}</textarea>
       </label>
-    </div>
 
-    <label class="block text-sm text-slate-600">
-      <span class="block mb-1 text-xs text-slate-500">真相 / 辟谣文</span>
-      <textarea name="truth_content" rows="4"
-        class="w-full rounded-lg bg-slate-50/50 border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-300 leading-relaxed"
-        placeholder="人工核查后的真相说明...">{{ rumor.truth_content or '' }}</textarea>
-    </label>
+      <label class="block text-sm text-slate-600">
+        <span class="block mb-1 text-xs text-slate-500">谣言内容</span>
+        <textarea name="rumor_content" rows="6"
+          class="w-full rounded-lg bg-slate-50/50 border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-300 leading-relaxed font-mono text-[13px]"
+          placeholder="谣言原文 — 修订错别字 / 删去无关内容">{{ rumor.rumor_content or '' }}</textarea>
+      </label>
+    </fieldset>
+
+    <!-- Verdict -->
+    <fieldset class="space-y-3 pt-2 border-t border-slate-100">
+      <legend class="text-xs font-medium text-slate-500 mb-1">裁决</legend>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <label class="text-sm text-slate-600">
+          <span class="block mb-1 text-xs text-slate-500">状态</span>
+          <select name="status" class="w-full rounded-lg bg-slate-50/50 border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-300">
+            {% for s in ['FAKE', 'TRUE', 'DUBIOUS', 'OUTDATED'] %}
+            <option value="{{ s }}" {% if rumor.status.value == s %}selected{% endif %}>{{ s }}</option>
+            {% endfor %}
+          </select>
+        </label>
+
+        <label class="text-sm text-slate-600 md:col-span-2 flex items-end gap-3">
+          <span class="flex items-center gap-2">
+            <input type="checkbox" name="is_published" value="1" {% if rumor.is_published %}checked{% endif %} class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500/30">
+            <span>发布</span>
+          </span>
+        </label>
+      </div>
+
+      <label class="block text-sm text-slate-600">
+        <span class="block mb-1 text-xs text-slate-500">真相 / 辟谣文</span>
+        <textarea name="truth_content" rows="4"
+          class="w-full rounded-lg bg-slate-50/50 border border-slate-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-300 leading-relaxed"
+          placeholder="人工核查后的真相说明...">{{ rumor.truth_content or '' }}</textarea>
+      </label>
+    </fieldset>
 
     <div class="flex items-center gap-3">
       <button type="submit" class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-500 transition-colors duration-150">

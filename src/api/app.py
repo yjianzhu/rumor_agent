@@ -19,6 +19,10 @@ media_path = Path(settings.MEDIA_DIR)
 if media_path.exists():
     app.mount("/media", StaticFiles(directory=str(media_path)), name="media")
 
+static_path = Path(__file__).parent / "static"
+if static_path.exists():
+    app.mount("/static", StaticFiles(directory=str(static_path)), name="static")
+
 # import routers after app is created to avoid circular imports
 from src.api.page_routes import router as page_router
 from src.api.partial_routes import router as partial_router

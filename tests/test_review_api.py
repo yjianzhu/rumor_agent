@@ -69,3 +69,23 @@ class TestRumorReviewEndpoint:
     def test_invalid_status_rejected(self, client, seeded_rumor):
         r = client.patch(f"/api/rumors/{seeded_rumor.slug}", json={"status": "BOGUS"})
         assert r.status_code == 422
+
+    def test_content_fields_updated(self, client, seeded_rumor):
+        r = client.patch(f"/api/rumors/{seeded_rumor.slug}", json={
+            "title": "Corrected Title",
+            "summary": "one-line summary",
+            "rumor_content": "Cleaned-up rumor body.",
+        })
+
+        assert r.status_code == 200
+        body = r.json()
+        assert body["title"] == "Corrected Title"
+        assert body["summary"] == "one-line summary"
+        assert body["rumor_content"] == "Cleaned-up rumor body."
+        # Verdict fields untouched
+        assert body["status"] == "DUBIOUS"
+        assert body["is_published"] is False
+
+    def test_empty_title_rejected(self, client, seeded_rumor):
+        r = client.patch(f"/api/rumors/{seeded_rumor.slug}", json={"title": ""})
+        assert r.status_code == 422

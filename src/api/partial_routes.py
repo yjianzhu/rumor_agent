@@ -88,6 +88,9 @@ def rumor_detail_partial(
 def rumor_review_partial(
     request: Request,
     slug: str,
+    title: str = Form(...),
+    summary: str = Form(""),
+    rumor_content: str = Form(""),
     status: RumorStatus = Form(...),
     truth_content: str = Form(""),
     is_published: bool = Form(False),
@@ -98,9 +101,16 @@ def rumor_review_partial(
     if rumor is None:
         raise HTTPException(status_code=404, detail="Rumor not found")
 
+    title = title.strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="title cannot be empty")
+
     update_rumor(db, rumor.id, RumorUpdate(
+        title=title,
+        summary=summary.strip() or None,
+        rumor_content=rumor_content.strip() or None,
         status=status,
-        truth_content=truth_content or None,
+        truth_content=truth_content.strip() or None,
         is_published=is_published,
     ))
 
