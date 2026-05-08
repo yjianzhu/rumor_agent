@@ -9,6 +9,7 @@ from src.db.crud import get_analysis_by_rumor_id, get_rumor_by_slug
 from src.db.models import RumorStatus
 from src.db.schemas import _RumorSampleIn, MediaItem, StructuredRumorAnalysis
 from src.main import import_jsonl_file, import_md_file
+from src.config import ApiEndpoint
 
 from tests.conftest import FakeAnalyzer, write_jsonl, write_md
 
@@ -148,6 +149,7 @@ def test_md_dry_run_calls_llm_and_prints_preview(tmp_path):
     out = output.getvalue()
     assert "truthfulness_score" in out
     assert "FAKE" in out
+    assert '"is_published": true' in out
     assert "Officials debunked it." in out
 
 
@@ -171,6 +173,29 @@ def test_no_verdict_signal_forces_dubious():
     )
     normalized = normalize_structured_analysis(sample, analysis)
     assert normalized.status == RumorStatus.DUBIOUS
+    assert normalized.rumor_content == "ignored"
+
+
+def test_md_without_truth_content_stays_unpublished(tmp_path):
+    md = write_md(tmp_path, "Unverified claim only.")
+    response = StructuredRumorAnalysis(
+        title="Unverified Claim",
+        summary="Summary",
+        rumor_content="Unverified claim only.",
+        truth_content=None,
+        status=RumorStatus.DUBIOUS,
+        tags=None,
+        source_urls=None,
+        analysis_summary=None,
+        truthfulness_score=0.0,
+        evidence=None,
+    )
+    output = io.StringIO()
+
+    stats = import_md_file(md, dry_run=True, output=output, analyzer=FakeAnalyzer([response]))
+
+    assert stats.succeeded == 1
+    assert '"is_published": false' in output.getvalue()
 
 
 # ─── Database integration tests ──────────────────────────────────────────────
@@ -226,7 +251,14 @@ def test_jsonl_duplicate_slug_skipped(tmp_path, db):
     assert rumor is not None
 
 
-def test_md_import_creates_rumor_and_analysis(tmp_path, db):
+def test_md_import_creates_rumor_and_analysis(tmp_path, db, monkeypatch):
+    monkeypatch.setattr(
+        "src.main.settings",
+        type("S", (), {
+            "llm_endpoint_list": [ApiEndpoint(model="gpt-5.4")],
+            "LLM_MODEL": "openai/gpt-4o-mini",
+        })(),
+    )
     title = f"md-import-{uuid4().hex[:8]}"
     md_content = "Officials clearly debunked this rumor."
     md = write_md(tmp_path, md_content, filename=f"{title}.md")
@@ -243,9 +275,32 @@ def test_md_import_creates_rumor_and_analysis(tmp_path, db):
     expected_slug = f"{slugify(title)}-{hash_suffix(md_content)}"
     rumor = get_rumor_by_slug(db, expected_slug)
     assert rumor is not None
+    assert rumor.rumor_content == "content"
+    assert rumor.is_published is True
     analysis = get_analysis_by_rumor_id(db, rumor.id)
     assert analysis is not None
     assert analysis.summary == "Fake"
+    assert analysis.model_name == "gpt-5.4"
+
+
+def test_md_import_model_override_wins(tmp_path, db):
+    title = f"md-model-override-{uuid4().hex[:8]}"
+    md = write_md(tmp_path, "Officials clearly debunked this rumor.", filename=f"{title}.md")
+    response = StructuredRumorAnalysis(
+        title=title, summary="summary", rumor_content="content",
+        truth_content="truth", status=RumorStatus.FAKE,
+        tags=None, source_urls=None,
+        analysis_summary="Fake", truthfulness_score=0.1, evidence="Debunked.",
+    )
+
+    stats = import_md_file(md, model="manual-model", analyzer=FakeAnalyzer([response]))
+
+    assert stats.succeeded == 1
+    rumor = get_rumor_by_slug(db, f"{slugify(title)}-{hash_suffix(md.read_text(encoding='utf-8'))}")
+    assert rumor is not None
+    analysis = get_analysis_by_rumor_id(db, rumor.id)
+    assert analysis is not None
+    assert analysis.model_name == "manual-model"
 
 
 # ─── dry-run vs real-run parity (codex review #2) ───────────────────────────

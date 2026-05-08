@@ -116,7 +116,7 @@ def normalize_structured_analysis(
     return StructuredRumorAnalysis(
         title=clean_text(analysis.title) or clean_text(sample.title) or derive_title(sample.raw_text),
         summary=clean_text(analysis.summary),
-        rumor_content=sample.raw_text.strip(),
+        rumor_content=clean_text(analysis.rumor_content) or sample.raw_text.strip(),
         truth_content=clean_text(analysis.truth_content),
         status=status,
         tags=dedupe_strings([*(sample.tags or []), *(analysis.tags or [])]) or None,

@@ -145,6 +145,7 @@ from PIL import Image, UnidentifiedImageError
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MiB
 ALLOWED_IMAGE_MIMES = {"image/png", "image/jpeg", "image/webp", "image/gif"}
+MEDIA_IMAGE_LABELS = {"rumor", "debunk"}
 _EXT_BY_MIME = {
     "image/png": ".png", "image/jpeg": ".jpg",
     "image/webp": ".webp", "image/gif": ".gif",
@@ -182,6 +183,7 @@ async def upload_media_partial(
     request: Request,
     slug: str,
     files: list[UploadFile] = File(...),
+    label: str = Form("rumor"),
     caption: str = Form(""),
     db: Session = Depends(get_db_session),
 ):
@@ -191,6 +193,7 @@ async def upload_media_partial(
 
     new_items: list[dict] = []
     error: str | None = None
+    media_label = label if label in MEDIA_IMAGE_LABELS else "rumor"
 
     for upload in files:
         if upload.content_type not in ALLOWED_IMAGE_MIMES:
@@ -223,7 +226,7 @@ async def upload_media_partial(
         new_items.append({
             "type": "image",
             "path": rel_path,
-            "label": "evidence",
+            "label": media_label,
             "caption": caption.strip(),
         })
 

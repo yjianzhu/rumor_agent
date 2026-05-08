@@ -476,7 +476,8 @@ def import_md_file(
             return stats
         slug = resolved.slug
 
-        rumor_data = to_rumor_create(structured, slug=slug, is_published=False, media_files=media_items)
+        is_published = structured.truth_content is not None and structured.status is not RumorStatus.DUBIOUS
+        rumor_data = to_rumor_create(structured, slug=slug, is_published=is_published, media_files=media_items)
 
         if dry_run:
             print_preview(stream, 1, {
@@ -502,7 +503,7 @@ def import_md_file(
                 summary=structured.analysis_summary,
                 truthfulness_score=structured.truthfulness_score,
                 evidence=structured.evidence,
-                model_name=model or settings.LLM_MODEL,
+                model_name=_resolve_llm_model_name(model),
             ),
         )
         db.commit()
@@ -614,7 +615,7 @@ def import_candidate_jsonl(
                     rumor_data = RumorCreate(
                         title=title,
                         slug=resolved.slug,
-                        summary=content,
+                        summary=None,
                         rumor_content=content,
                         truth_content=None,
                         status=RumorStatus.DUBIOUS,
@@ -783,6 +784,11 @@ def _safe_get_embedding(text: str) -> list[float] | None:
     except Exception as exc:
         logger.warning("Embedding generation failed, skipping semantic dedup: %s", exc)
         return None
+
+
+def _resolve_llm_model_name(model: str | None = None) -> str:
+    first_endpoint = settings.llm_endpoint_list[0] if settings.llm_endpoint_list else None
+    return model or (first_endpoint.model if first_endpoint else None) or settings.LLM_MODEL
 
 
 def print_preview(stream: TextIO, line_no: int, payload: Any) -> None:

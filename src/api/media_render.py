@@ -26,6 +26,12 @@ _PLATFORMS: tuple[tuple[tuple[str, ...], VideoPlatform], ...] = (
 _GENERIC = VideoPlatform("generic", "外部链接", "sky")
 
 
+def _media_value(item, key: str, default: str = "") -> str:
+    if isinstance(item, dict):
+        return item.get(key) or default
+    return getattr(item, key, default) or default
+
+
 def detect_platform(url: str) -> VideoPlatform:
     """Map a video URL to its platform metadata."""
     try:
@@ -53,12 +59,18 @@ def split_media(media_files):
     images = []
     videos = []
     for item in media_files or []:
-        if item.type == "image":
-            images.append(item)
-        elif item.type == "video":
+        media_type = _media_value(item, "type")
+        if media_type == "image":
+            images.append({
+                "path": _media_value(item, "path"),
+                "caption": _media_value(item, "caption"),
+                "label": _media_value(item, "label"),
+            })
+        elif media_type == "video":
+            path = _media_value(item, "path")
             videos.append({
-                "url": item.path,
-                "caption": item.caption,
-                "platform": detect_platform(item.path),
+                "url": path,
+                "caption": _media_value(item, "caption"),
+                "platform": detect_platform(path),
             })
     return images, videos

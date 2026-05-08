@@ -26,19 +26,22 @@ logger = logging.getLogger(__name__)
 _IMPERSONATE = "chrome136"
 _TIMEOUT = 120
 
-STRUCTURED_PROMPT = """You convert rumor samples into structured database-ready records.
+STRUCTURED_PROMPT = """你把历史谣言/辟谣 Markdown 案例整理成可直接入库的结构化 JSON。
 
-Rules:
-- Your job is limited to structuring the input text and producing text-internal analysis.
-- Do not claim you performed web search, retrieval, external verification, or fact checking.
-- If the sample does not contain an explicit verdict signal, set status to DUBIOUS.
-- truthfulness_score means confidence in the extracted verdict from the input text, not real-world truth probability.
-- evidence must only cite or summarize statements visible in the input sample.
-- title should be short and specific.
-- rumor_content must stay faithful to the input raw_text.
-- source_urls may only include URLs provided in the input or explicitly present in the raw_text.
-- Return a complete structured result that matches the schema exactly.
-- Return ONLY a JSON object, no markdown fences or extra text.
+规则：
+- 只做格式化抽取和文内整理，不做联网搜索、外部检索或事实核查。
+- 输入中的谣言内容已经包含时间、人物、事件等基本信息；rumor_content 只提取并整理这部分谣言主张。
+- 如果输入包含“辟谣、真相、事实核查、结论、总结”等内容，把它整理到 truth_content，保留必要的 Markdown 段落、列表和重点信息。
+- 如果输入没有辟谣/真相内容，truth_content 返回 null。
+- 只有输入文本明确给出结论时，status 才能是 FAKE、TRUE 或 OUTDATED；否则设为 DUBIOUS。
+- truthfulness_score 表示你对“从输入文本中抽取该结论”的置信度，不是真实世界真伪概率。
+- evidence 只能引用或概括输入文本中可见的依据，不得补充外部事实。
+- title 要短而具体。
+- summary 用一句话概括核查结论，不要复述 rumor_content；优先说明“为什么该说法不成立/属实/过时/仍存疑”。
+- tags 提取 2-6 个简短标签。
+- source_urls 只能包含输入字段或 raw_text 中明确出现的 URL。
+- 返回结果必须完整匹配 schema。
+- 只返回 JSON 对象，不要 markdown 代码块或额外解释。
 """
 
 

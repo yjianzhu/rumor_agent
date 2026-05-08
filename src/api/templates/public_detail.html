@@ -9,6 +9,8 @@
   'DUBIOUS':  {'label': '存疑', 'pill': 'bg-amber-50 text-amber-700 ring-amber-200',        'rule': 'border-amber-300'},
 } %}
 {% set meta = status_meta.get(rumor.status.value, status_meta['DUBIOUS']) %}
+{% set summary_text = (rumor.summary or '') | trim %}
+{% set rumor_text = (rumor.rumor_content or '') | trim %}
 
 {% block content %}
 <article class="max-w-3xl mx-auto px-5 sm:px-8 pt-12 pb-16">
@@ -35,7 +37,7 @@
     <h1 class="font-serif text-3xl sm:text-4xl font-bold tracking-tight leading-tight text-ink">
       {{ rumor.title }}
     </h1>
-    {% if rumor.summary %}
+    {% if summary_text and summary_text != rumor_text %}
     <p class="mt-5 text-lg text-stone-600 leading-relaxed font-light">{{ rumor.summary }}</p>
     {% endif %}
   </header>
@@ -68,13 +70,31 @@
     </section>
     {% endif %}
 
-    {% if images %}
+    {% if rumor_images %}
     <section>
-      <h2 class="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500 mb-3">图片证据</h2>
-      <div class="grid {% if images|length == 1 %}grid-cols-1{% else %}grid-cols-1 sm:grid-cols-2{% endif %} gap-4">
-        {% for img in images %}
+      <h2 class="text-xs font-semibold uppercase tracking-[0.18em] text-rose-600 mb-3">传言图片</h2>
+      <div class="grid {% if rumor_images|length == 1 %}grid-cols-1{% else %}grid-cols-1 sm:grid-cols-2{% endif %} gap-4">
+        {% for img in rumor_images %}
         <figure>
-          <a href="/media/{{ img.path }}" target="_blank" rel="noopener" class="block overflow-hidden rounded-xl border border-stone-200/80 bg-stone-100">
+          <a href="/media/{{ img.path }}" target="_blank" rel="noopener" class="block overflow-hidden rounded-xl border border-rose-100 bg-stone-100">
+            <img src="/media/{{ img.path }}" alt="{{ img.caption }}" class="w-full h-auto object-cover hover:opacity-95 transition-opacity">
+          </a>
+          {% if img.caption %}
+          <figcaption class="text-xs text-stone-400 mt-2">{{ img.caption }}</figcaption>
+          {% endif %}
+        </figure>
+        {% endfor %}
+      </div>
+    </section>
+    {% endif %}
+
+    {% if debunk_images %}
+    <section>
+      <h2 class="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700 mb-3">辟谣图片</h2>
+      <div class="grid {% if debunk_images|length == 1 %}grid-cols-1{% else %}grid-cols-1 sm:grid-cols-2{% endif %} gap-4">
+        {% for img in debunk_images %}
+        <figure>
+          <a href="/media/{{ img.path }}" target="_blank" rel="noopener" class="block overflow-hidden rounded-xl border border-emerald-100 bg-stone-100">
             <img src="/media/{{ img.path }}" alt="{{ img.caption }}" class="w-full h-auto object-cover hover:opacity-95 transition-opacity">
           </a>
           {% if img.caption %}
@@ -111,18 +131,6 @@
         </li>
         {% endfor %}
       </ul>
-    </section>
-    {% endif %}
-
-    {% if analysis and analysis.evidence %}
-    <section>
-      <h2 class="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500 mb-3">核查依据</h2>
-      <div class="bg-stone-50 border border-stone-200/80 rounded-lg px-5 py-4">
-        <p class="text-sm text-stone-700 leading-[1.85] whitespace-pre-wrap">{{ analysis.evidence }}</p>
-        {% if analysis.model_name %}
-        <p class="mt-3 text-[11px] text-stone-400">分析模型：{{ analysis.model_name }}</p>
-        {% endif %}
-      </div>
     </section>
     {% endif %}
 

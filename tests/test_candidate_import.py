@@ -37,6 +37,9 @@ class TestImportCandidateJsonl:
         output = buf.getvalue()
         assert "小米SU7安全性争议" in output
         assert "DUBIOUS" in output
+        parsed = json.loads(output.split(": ", 1)[1])
+        assert parsed["summary"] is None
+        assert parsed["rumor_content"] == "多方对小米SU7的碰撞安全表现存在分歧"
 
     def test_empty_title_skipped(self, tmp_path):
         events = [

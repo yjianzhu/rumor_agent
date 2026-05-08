@@ -1,6 +1,6 @@
 # Rumor Agent
 
-人工辅助辟谣平台。LLM 负责采集与归纳争议事件，最终的真假裁决（FAKE / TRUE / OUTDATED）由运营人员通过 Web 审核界面完成。
+人工辅助辟谣平台。LLM 负责采集线索归纳和历史案例结构化；新采集线索的真假裁决由运营人员审核，历史人工辟谣 Markdown 可在结构化后直接形成完整公开案例。
 
 ## 定位
 
@@ -9,7 +9,7 @@
 - 把社媒内容归纳为「争议事件」（谁、说了什么、来源 URL）
 - 对人工已写好的辟谣文档做结构化提取
 
-真假判定、辟谣文撰写、是否发布都由人工通过 Web 界面完成。
+新采集线索的真假判定、辟谣文撰写、是否发布由人工通过 Web 界面完成。历史 Markdown 导入只抽取人工已经写好的谣言与辟谣内容，不做新的事实核查；若文档内已有明确结论和辟谣内容，则自动发布为完整案例。
 
 ## 数据流
 
@@ -20,9 +20,65 @@ collect-bili / collect-xhs  →  triage-jsonl          →    import-candidate-j
                                                                     ↓
                                                             [人工审核 Web UI]
                                                               status / truth_content / is_published
+
+[历史人工辟谣 Markdown]       [Structured LLM]             [入库]
+import-md                 →  结构化案例 JSON       →    DB（有明确辟谣内容时自动发布）
 ```
 
 旁路：`import-md`（导入历史人工辟谣案例）、`import-jsonl`（结构化数据直接导入）。
+
+## LLM 处理格式
+
+项目有两条 LLM 链路，输出格式不同，不能混用。
+
+### 1. 爬虫数据 → 争议事件候选
+
+`collect-bili` / `collect-xhs` 产出的 raw JSONL 是社交媒体搜索结果，包含 `title`、`description`、`url`、`author`、`rank_meta`、`comments` 等字段。`triage-jsonl` 会先做轻量噪声过滤，再把剩余记录交给 LLM 合并为“争议事件候选”。
+
+LLM 在这条链路中只做归纳，不做真假裁决。它需要输出 JSON 数组，每个元素固定为：
+
+```json
+{
+  "title": "争议点标题，短而具体",
+  "content": "2-5句争议摘要，保留核心主张并尽量归因到平台和作者",
+  "source_urls": ["只允许使用输入中出现过的URL"],
+  "controversy_type": "安全|质量|性能|价格|营销宣传|合规法律|售后服务|其他"
+}
+```
+
+后处理会过滤 LLM 编造的 URL，并把可追溯的 `source_refs` 附加到 candidate JSONL。随后 `import-candidate-jsonl` 把每条候选写入 `rumors`：`status=DUBIOUS`、`is_published=false`、`summary=content`、`rumor_content=content`。这类数据进入后台待审核。
+
+### 2. 历史 Markdown → 完整谣言案例
+
+`import-md` 用于导入人工已经写好的历史辟谣文档。推荐目录：
+
+```text
+data/import/markdown/
+```
+
+Markdown 中的谣言内容应已经包含时间、人物、事件等基本信息。LLM 在这条链路中只把文档整理成数据库结构，不做外部核查。它需要输出一个匹配 `StructuredRumorAnalysis` 的 JSON 对象：
+
+```json
+{
+  "title": "短标题",
+  "summary": "一句话概括",
+  "rumor_content": "只包含原始传言主张，保留时间、人物、事件等关键信息",
+  "truth_content": "如果原文包含辟谣、真相、事实核查或总结，则整理到这里；否则为null",
+  "status": "FAKE|TRUE|OUTDATED|DUBIOUS",
+  "tags": ["2-6个短标签"],
+  "source_urls": ["只允许使用文档中已有URL"],
+  "analysis_summary": "对文内核查逻辑的简短归纳",
+  "truthfulness_score": 0.0,
+  "evidence": "只能概括文档中可见的依据"
+}
+```
+
+导入规则：
+
+- `rumor_content` 使用 LLM 从 Markdown 中提取出的传言主张，不再保存整篇 Markdown 原文。
+- `truth_content` 有内容且 `status != DUBIOUS` 时，导入后自动 `is_published=true`，直接成为公开案例。
+- 没有明确辟谣内容或结论不明确时，仍以 `is_published=false` 进入后台。
+- 图片仅支持 Markdown 本地图片引用 `![caption](path)`，会记录到 `media_files`。
 
 ## 数据模型
 

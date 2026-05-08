@@ -117,9 +117,12 @@ def public_detail(
         raise HTTPException(status_code=404, detail="Rumor not found")
 
     images, videos = split_media(rumor.media_files)
+    rumor_images = [img for img in images if img["label"] == "rumor"]
+    debunk_images = [img for img in images if img["label"] != "rumor"]
     return templates.TemplateResponse(request, "public_detail.html", {
         "rumor": rumor,
         "analysis": rumor.analysis,
-        "images": images,
+        "rumor_images": rumor_images,
+        "debunk_images": debunk_images,
         "videos": videos,
     })

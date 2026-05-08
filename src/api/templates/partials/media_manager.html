@@ -18,11 +18,15 @@
   <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
     {% for item in rumor.media_files %}
     {% if item.type == 'image' %}
+    {% set image_label = item.label if item.label in ['rumor', 'debunk'] else 'debunk' %}
     <figure class="group relative bg-slate-50 rounded-lg overflow-hidden border border-slate-200/60 aspect-square">
       <a href="/media/{{ item.path }}" target="_blank" rel="noopener" class="block w-full h-full">
         <img src="/media/{{ item.path }}" alt="{{ item.caption }}"
              class="w-full h-full object-cover group-hover:opacity-90 transition-opacity">
       </a>
+      <span class="absolute top-1.5 left-1.5 rounded-full bg-white/85 px-2 py-0.5 text-[10px] font-medium text-slate-600 shadow-sm">
+        {{ '传言' if image_label == 'rumor' else '辟谣' }}
+      </span>
       <button
         type="button"
         title="移除"
@@ -81,6 +85,13 @@
                  hover:file:bg-indigo-100 file:cursor-pointer"
         >
       </label>
+      <select
+        name="label"
+        class="rounded-lg bg-white border border-slate-200 px-3 py-1.5 text-sm text-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-300 sm:w-28"
+      >
+        <option value="rumor">谣言图片</option>
+        <option value="debunk">辟谣图片</option>
+      </select>
       <input
         type="text"
         name="caption"

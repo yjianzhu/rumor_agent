@@ -42,3 +42,5 @@ review*.md
 
 cli_tools/
 data/
+
+.playwright-mcp/

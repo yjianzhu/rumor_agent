@@ -2,14 +2,16 @@
 from __future__ import annotations
 
 from uuid import uuid4
+from io import BytesIO
 
 import pytest
 from fastapi.testclient import TestClient
+from PIL import Image
 from sqlalchemy import inspect
 from sqlalchemy.orm.attributes import NO_VALUE
 
 from src.api.app import app
-from src.db.crud import create_analysis_result, create_rumor, list_rumors
+from src.db.crud import create_analysis_result, create_rumor, get_rumor_by_slug, list_rumors
 from src.db.models import RumorStatus
 from src.db.schemas import AnalysisResultCreate, RumorCreate
 
@@ -125,6 +127,24 @@ class TestReviewFormPartial:
             data={"title": "   ", "status": "DUBIOUS"},
         )
         assert r.status_code == 400
+
+    def test_media_upload_stores_selected_label(self, client, dubious_rumor, db, tmp_path, monkeypatch):
+        monkeypatch.setattr("src.media.settings", type("S", (), {"MEDIA_DIR": str(tmp_path)})())
+        image = BytesIO()
+        Image.new("RGB", (1, 1), color="white").save(image, format="PNG")
+        image.seek(0)
+
+        r = client.post(
+            f"/admin/partials/rumors/{dubious_rumor.slug}/media",
+            data={"label": "debunk", "caption": "辟谣截图"},
+            files=[("files", ("proof.png", image, "image/png"))],
+        )
+
+        assert r.status_code == 200
+        assert "辟谣" in r.text
+        loaded = get_rumor_by_slug(db, dubious_rumor.slug)
+        assert loaded.media_files[0]["label"] == "debunk"
+        assert loaded.media_files[0]["caption"] == "辟谣截图"
 
 
 class TestViewFilter:
