@@ -253,8 +253,10 @@ def test_jsonl_duplicate_slug_skipped(tmp_path, db):
 
 def test_md_import_creates_rumor_and_analysis(tmp_path, db, monkeypatch):
     from src.main import settings
+    import src.main as main_mod
 
     monkeypatch.setattr(settings, "LLM_ENDPOINTS", [ApiEndpoint(model="gpt-5.4")])
+    monkeypatch.setattr(main_mod, "IMPORTED_MD_DIR", tmp_path / "imported")
     title = f"md-import-{uuid4().hex[:8]}"
     md_content = "Officials clearly debunked this rumor."
     md = write_md(tmp_path, md_content, filename=f"{title}.md")
@@ -279,9 +281,13 @@ def test_md_import_creates_rumor_and_analysis(tmp_path, db, monkeypatch):
     assert analysis.model_name == "gpt-5.4"
 
 
-def test_md_import_model_override_wins(tmp_path, db):
+def test_md_import_model_override_wins(tmp_path, db, monkeypatch):
+    import src.main as main_mod
+
+    monkeypatch.setattr(main_mod, "IMPORTED_MD_DIR", tmp_path / "imported")
     title = f"md-model-override-{uuid4().hex[:8]}"
-    md = write_md(tmp_path, "Officials clearly debunked this rumor.", filename=f"{title}.md")
+    md_body = "Officials clearly debunked this rumor."
+    md = write_md(tmp_path, md_body, filename=f"{title}.md")
     response = StructuredRumorAnalysis(
         title=title, summary="summary", rumor_content="content",
         truth_content="truth", status=RumorStatus.FAKE,
@@ -292,11 +298,94 @@ def test_md_import_model_override_wins(tmp_path, db):
     stats = import_md_file(md, model="manual-model", analyzer=FakeAnalyzer([response]))
 
     assert stats.succeeded == 1
-    rumor = get_rumor_by_slug(db, f"{slugify(title)}-{hash_suffix(md.read_text(encoding='utf-8'))}")
+    rumor = get_rumor_by_slug(db, f"{slugify(title)}-{hash_suffix(md_body)}")
     assert rumor is not None
     analysis = get_analysis_by_rumor_id(db, rumor.id)
     assert analysis is not None
     assert analysis.model_name == "manual-model"
+
+
+# ─── --import-md archive behavior ───────────────────────────────────────────
+
+def _make_md_response(title: str) -> StructuredRumorAnalysis:
+    return StructuredRumorAnalysis(
+        title=title, summary="summary", rumor_content="content",
+        truth_content="truth", status=RumorStatus.FAKE,
+        tags=None, source_urls=None,
+        analysis_summary="Fake", truthfulness_score=0.1, evidence="Debunked.",
+    )
+
+
+def test_md_import_archives_file_on_success(tmp_path, db, monkeypatch):
+    import src.main as main_mod
+
+    archive = tmp_path / "imported"
+    monkeypatch.setattr(main_mod, "IMPORTED_MD_DIR", archive)
+
+    title = f"archive-ok-{uuid4().hex[:8]}"
+    md = write_md(tmp_path, "Officials debunked this.", filename=f"{title}.md")
+
+    stats = import_md_file(md, analyzer=FakeAnalyzer([_make_md_response(title)]))
+
+    assert stats.succeeded == 1
+    assert not md.exists()
+    assert (archive / md.name).exists()
+
+
+def test_md_import_archives_file_on_duplicate(tmp_path, db, monkeypatch):
+    import src.main as main_mod
+
+    archive = tmp_path / "imported"
+    monkeypatch.setattr(main_mod, "IMPORTED_MD_DIR", archive)
+
+    title = f"archive-dup-{uuid4().hex[:8]}"
+    body = "Officials debunked this duplicate."
+    md1 = write_md(tmp_path, body, filename=f"{title}.md")
+    stats1 = import_md_file(md1, analyzer=FakeAnalyzer([_make_md_response(title)]))
+    assert stats1.succeeded == 1
+
+    md2 = write_md(tmp_path, body, filename=f"{title}-dup.md")
+    stats2 = import_md_file(md2, analyzer=FakeAnalyzer([_make_md_response(title)]))
+
+    assert stats2.duplicates == 1
+    assert not md2.exists()
+    assert (archive / md2.name).exists()
+
+
+def test_md_import_dry_run_keeps_file(tmp_path, db, monkeypatch):
+    import src.main as main_mod
+
+    archive = tmp_path / "imported"
+    monkeypatch.setattr(main_mod, "IMPORTED_MD_DIR", archive)
+
+    title = f"archive-dry-{uuid4().hex[:8]}"
+    md = write_md(tmp_path, "Officials debunked this.", filename=f"{title}.md")
+
+    stats = import_md_file(md, dry_run=True, analyzer=FakeAnalyzer([_make_md_response(title)]))
+
+    assert stats.succeeded == 1
+    assert md.exists()
+    assert not archive.exists()
+
+
+def test_md_import_archive_collision_gets_timestamp_prefix(tmp_path, db, monkeypatch):
+    import src.main as main_mod
+
+    archive = tmp_path / "imported"
+    archive.mkdir()
+    (archive / "collide.md").write_text("preexisting", encoding="utf-8")
+    monkeypatch.setattr(main_mod, "IMPORTED_MD_DIR", archive)
+
+    title = f"archive-collide-{uuid4().hex[:8]}"
+    md = write_md(tmp_path, "Officials debunked this.", filename="collide.md")
+
+    stats = import_md_file(md, analyzer=FakeAnalyzer([_make_md_response(title)]))
+
+    assert stats.succeeded == 1
+    assert not md.exists()
+    archived = [p for p in archive.iterdir() if p.name.endswith("collide.md") and p.name != "collide.md"]
+    assert len(archived) == 1
+    assert (archive / "collide.md").read_text(encoding="utf-8") == "preexisting"
 
 
 # ─── dry-run vs real-run parity (codex review #2) ───────────────────────────

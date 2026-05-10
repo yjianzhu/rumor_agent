@@ -11,4 +11,55 @@
 </a>
 
 {% include "partials/rumor_detail.html" %}
+
+<script>
+  // 粘贴上传 — 仅审核详情页绑定一次。
+  // 当焦点不在 input/textarea/contenteditable 时，提取剪贴板里的图片 blob 上传到媒体接口，
+  // 复用 #media-manager 表单的 label / caption 字段，命中后端现有校验与盖章逻辑。
+  (function () {
+    document.addEventListener('paste', function (e) {
+      const t = e.target;
+      const tag = t && t.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || (t && t.isContentEditable)) return;
+
+      const items = Array.from((e.clipboardData && e.clipboardData.items) || []);
+      const images = items
+        .filter(it => it.kind === 'file' && it.type.startsWith('image/'))
+        .map(it => it.getAsFile())
+        .filter(Boolean);
+      if (!images.length) return;
+
+      const manager = document.getElementById('media-manager');
+      const form = manager && manager.querySelector('form');
+      if (!form) return;
+
+      e.preventDefault();
+
+      const fd = new FormData();
+      const ts = Date.now();
+      images.forEach((blob, i) => {
+        const ext = (blob.type.split('/')[1] || 'png').split('+')[0];
+        const name = blob.name && blob.name !== 'image.png' ? blob.name : `paste-${ts}-${i}.${ext}`;
+        fd.append('files', blob, name);
+      });
+      fd.append('label', (form.querySelector('[name=label]') || {}).value || 'rumor');
+      fd.append('caption', (form.querySelector('[name=caption]') || {}).value || '');
+
+      const indicator = document.getElementById('media-uploading');
+      if (indicator) indicator.classList.add('htmx-request');
+
+      fetch(form.getAttribute('hx-post'), { method: 'POST', body: fd })
+        .then(r => r.text())
+        .then(html => {
+          const wrapper = document.createElement('div');
+          wrapper.innerHTML = html.trim();
+          const newEl = wrapper.firstElementChild;
+          if (!newEl) return;
+          manager.replaceWith(newEl);
+          if (window.htmx) window.htmx.process(newEl);
+        })
+        .catch(err => console.error('paste upload failed:', err));
+    });
+  })();
+</script>
 {% endblock %}

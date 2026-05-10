@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 import sys
@@ -449,6 +451,26 @@ def _resolve_slug(
 
 # ─── Markdown import via LLM ─────────────────────────────────────────────────
 
+IMPORTED_MD_DIR = Path("data/imported")
+
+
+def _archive_md_file(path: Path) -> None:
+    """Move a processed markdown file into ``data/imported/``.
+
+    On name collision the moved file is prefixed with a timestamp.
+    Failure to move is logged but does not propagate — import already succeeded.
+    """
+    try:
+        IMPORTED_MD_DIR.mkdir(parents=True, exist_ok=True)
+        target = IMPORTED_MD_DIR / path.name
+        if target.exists():
+            target = IMPORTED_MD_DIR / f"{time.strftime('%Y%m%dT%H%M%S')}_{path.name}"
+        shutil.move(str(path), str(target))
+        logger.info("Archived md → %s", target)
+    except Exception as exc:
+        logger.warning("Failed to archive %s: %s", path, exc)
+
+
 def import_md_file(
     path: Path,
     *,
@@ -473,6 +495,8 @@ def import_md_file(
         if resolved.slug is None:
             stats.duplicates = 1
             logger.warning("Duplicate rumor skipped for: %s", path.name)
+            if not dry_run:
+                _archive_md_file(path)
             return stats
         slug = resolved.slug
 
@@ -509,6 +533,7 @@ def import_md_file(
         db.commit()
         stats.succeeded = 1
         logger.info("Imported from %s → slug=%s", path.name, slug)
+        _archive_md_file(path)
 
     except Exception as exc:
         stats.failed = 1
