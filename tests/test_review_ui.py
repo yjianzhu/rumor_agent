@@ -6,7 +6,7 @@ from io import BytesIO
 
 import pytest
 from fastapi.testclient import TestClient
-from PIL import Image
+from PIL import Image, ImageChops
 from sqlalchemy import inspect
 from sqlalchemy.orm.attributes import NO_VALUE
 
@@ -134,6 +134,7 @@ class TestReviewFormPartial:
         monkeypatch.setattr(media_settings, "MEDIA_DIR", str(tmp_path))
         image = BytesIO()
         Image.new("RGB", (1, 1), color="white").save(image, format="PNG")
+        original_bytes = image.getvalue()
         image.seek(0)
 
         r = client.post(
@@ -147,6 +148,84 @@ class TestReviewFormPartial:
         loaded = get_rumor_by_slug(db, dubious_rumor.slug)
         assert loaded.media_files[0]["label"] == "debunk"
         assert loaded.media_files[0]["caption"] == "辟谣截图"
+        assert (tmp_path / loaded.media_files[0]["path"]).read_bytes() == original_bytes
+
+    def test_media_upload_stamps_rumor_image(self, client, dubious_rumor, db, tmp_path, monkeypatch):
+        from src.media import settings as media_settings
+
+        monkeypatch.setattr(media_settings, "MEDIA_DIR", str(tmp_path))
+        image = BytesIO()
+        Image.new("RGB", (300, 220), color="white").save(image, format="PNG")
+        original_bytes = image.getvalue()
+        image.seek(0)
+
+        r = client.post(
+            f"/admin/partials/rumors/{dubious_rumor.slug}/media",
+            data={"label": "rumor", "caption": "网传截图"},
+            files=[("files", ("claim.png", image, "image/png"))],
+        )
+
+        assert r.status_code == 200
+        loaded = get_rumor_by_slug(db, dubious_rumor.slug)
+        assert loaded.media_files[0]["label"] == "rumor"
+        saved = (tmp_path / loaded.media_files[0]["path"]).read_bytes()
+        assert saved != original_bytes
+        original = Image.open(BytesIO(original_bytes)).convert("RGB")
+        stamped = Image.open(BytesIO(saved)).convert("RGB")
+        assert ImageChops.difference(original, stamped).getbbox() is not None
+
+    def test_media_upload_rejects_rumor_gif(self, client, dubious_rumor, db, tmp_path, monkeypatch):
+        from src.media import settings as media_settings
+
+        monkeypatch.setattr(media_settings, "MEDIA_DIR", str(tmp_path))
+        image = BytesIO()
+        Image.new("RGB", (16, 16), color="white").save(image, format="GIF")
+        image.seek(0)
+
+        r = client.post(
+            f"/admin/partials/rumors/{dubious_rumor.slug}/media",
+            data={"label": "rumor"},
+            files=[("files", ("claim.gif", image, "image/gif"))],
+        )
+
+        assert r.status_code == 200
+        assert "谣言 GIF 暂不支持自动盖章" in r.text
+        loaded = get_rumor_by_slug(db, dubious_rumor.slug)
+        assert loaded.media_files == []
+
+    def test_delete_rumor_returns_redirect_and_removes_record(self, client, dubious_rumor, db):
+        slug = dubious_rumor.slug
+        r = client.delete(f"/admin/partials/rumors/{slug}")
+
+        assert r.status_code == 204
+        assert r.headers.get("HX-Redirect") == "/admin"
+        db.expire_all()
+        assert get_rumor_by_slug(db, slug) is None
+
+    def test_delete_unknown_slug_returns_404(self, client):
+        r = client.delete("/admin/partials/rumors/no-such-slug")
+        assert r.status_code == 404
+
+    def test_delete_rumor_cascades_analysis(self, client, dubious_rumor, db):
+        from src.db.models import AnalysisResult
+
+        create_analysis_result(db, AnalysisResultCreate(
+            rumor_id=dubious_rumor.id,
+            model_name="test-model",
+            evidence="e1",
+            truthfulness_score=0.5,
+        ))
+        db.commit()
+        rumor_id = dubious_rumor.id
+        slug = dubious_rumor.slug
+
+        r = client.delete(f"/admin/partials/rumors/{slug}")
+        assert r.status_code == 204
+
+        db.expire_all()
+        assert get_rumor_by_slug(db, slug) is None
+        leftover = db.query(AnalysisResult).filter_by(rumor_id=rumor_id).first()
+        assert leftover is None
 
 
 class TestViewFilter:

@@ -154,6 +154,14 @@
         保存审核
       </button>
       <span class="htmx-indicator text-sm text-slate-400">保存中...</span>
+      <button
+        type="button"
+        hx-delete="/admin/partials/rumors/{{ rumor.slug }}"
+        hx-confirm="确定删除此条谣言？操作不可撤销。"
+        class="ml-auto px-3 py-2 text-sm font-medium text-rose-600 bg-rose-50/60 rounded-lg hover:bg-rose-100 transition-colors duration-150"
+      >
+        删除
+      </button>
     </div>
   </form>
 </article>

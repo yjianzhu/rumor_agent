@@ -1,8 +1,10 @@
 from pathlib import Path
+from io import BytesIO
 
 import pytest
+from PIL import Image, ImageChops
 
-from src.media import save_image
+from src.media import save_image, stamp_rumor_image
 from src.ingest.readers import extract_md_images
 
 
@@ -79,3 +81,43 @@ def test_save_image_path_format_matches_extract_md_images(tmp_path, monkeypatch)
     assert not items[0].path.startswith("media/"), f"extract_md_images leaked prefix: {items[0].path!r}"
     # And both producers point at the same physical file when given the same slug/filename pair
     assert items[0].path == "rumor-B/pic.jpg"
+
+
+def test_stamp_rumor_image_burns_centered_seal_into_png():
+    image = BytesIO()
+    Image.new("RGB", (300, 220), color="white").save(image, format="PNG")
+
+    stamped = stamp_rumor_image(image.getvalue(), "image/png")
+
+    original = Image.open(BytesIO(image.getvalue())).convert("RGB")
+    result = Image.open(BytesIO(stamped)).convert("RGB")
+    assert result.size == original.size
+    assert ImageChops.difference(original, result).getbbox() is not None
+
+
+def test_stamp_rumor_image_outputs_jpeg_for_jpeg_input():
+    image = BytesIO()
+    Image.new("RGB", (300, 220), color="white").save(image, format="JPEG")
+
+    stamped = stamp_rumor_image(image.getvalue(), "image/jpeg")
+
+    with Image.open(BytesIO(stamped)) as result:
+        assert result.format == "JPEG"
+
+
+def test_stamp_rumor_image_rejects_gif():
+    image = BytesIO()
+    Image.new("RGB", (16, 16), color="white").save(image, format="GIF")
+
+    with pytest.raises(ValueError, match="GIF"):
+        stamp_rumor_image(image.getvalue(), "image/gif")
+
+
+def test_stamp_rumor_image_handles_tiny_image():
+    image = BytesIO()
+    Image.new("RGB", (1, 1), color="white").save(image, format="PNG")
+
+    stamped = stamp_rumor_image(image.getvalue(), "image/png")
+
+    with Image.open(BytesIO(stamped)) as result:
+        assert result.size == (1, 1)

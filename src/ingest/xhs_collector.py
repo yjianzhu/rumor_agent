@@ -207,13 +207,11 @@ def _fetch_detail(
     return "", []
 
 
-def build_note_url(note_id: str, xsec_token: str) -> str:
-    if not note_id or not xsec_token:
+def build_note_url(note_id: str) -> str:
+    """Build a clean note URL without time-sensitive xsec_token query params."""
+    if not note_id:
         return ""
-    return (
-        f"https://www.xiaohongshu.com/explore/{note_id}"
-        f"?xsec_token={xsec_token}&xsec_source=pc_search"
-    )
+    return f"https://www.xiaohongshu.com/explore/{note_id}"
 
 
 def parse_feed(
@@ -234,7 +232,7 @@ def parse_feed(
         "title": note_card.get("displayTitle", ""),
         "description": "",
         "comments": [],
-        "source_url": build_note_url(note_id, xsec_token),
+        "source_url": build_note_url(note_id),
         "note_id": note_id,
         "xsec_token": xsec_token,
         "author": user.get("nickname") or user.get("nickName", ""),

@@ -13,20 +13,11 @@ from src.main import main
 
 class TestBuildNoteUrl:
     def test_normal(self):
-        url = build_note_url("abc123", "tok-xyz")
-        assert url == (
-            "https://www.xiaohongshu.com/explore/abc123"
-            "?xsec_token=tok-xyz&xsec_source=pc_search"
-        )
+        url = build_note_url("abc123")
+        assert url == "https://www.xiaohongshu.com/explore/abc123"
 
     def test_empty_id(self):
-        assert build_note_url("", "tok") == ""
-
-    def test_empty_token(self):
-        assert build_note_url("abc", "") == ""
-
-    def test_both_empty(self):
-        assert build_note_url("", "") == ""
+        assert build_note_url("") == ""
 
 
 class TestParseFeed:

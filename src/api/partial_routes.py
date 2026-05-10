@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from sqlalchemy.orm import Session
 
 from src.api.deps import get_db_session, make_templates, resolve_view
@@ -10,6 +10,7 @@ from src.db.crud import (
     count_recent,
     count_rumors,
     count_rumors_filtered,
+    delete_rumor,
     get_rumor_by_slug,
     get_rumor_detail_by_slug,
     list_rumors,
@@ -18,7 +19,7 @@ from src.db.crud import (
 )
 from src.db.models import RumorStatus
 from src.db.schemas import RumorUpdate
-from src.media import save_image
+from src.media import save_image, stamp_rumor_image
 
 templates = make_templates()
 
@@ -120,6 +121,21 @@ def rumor_review_partial(
     })
 
 
+@router.delete("/rumors/{slug}")
+def rumor_delete_partial(
+    slug: str,
+    db: Session = Depends(get_db_session),
+):
+    """Hard-delete a rumor and cascade its analysis. Disk media files are left intact."""
+    rumor = get_rumor_by_slug(db, slug)
+    if rumor is None:
+        raise HTTPException(status_code=404, detail="Rumor not found")
+
+    delete_rumor(db, rumor.id)
+    db.commit()
+    return Response(status_code=204, headers={"HX-Redirect": "/admin"})
+
+
 @router.get("/stats", response_class=HTMLResponse)
 def stats_partial(
     request: Request,
@@ -215,6 +231,13 @@ async def upload_media_partial(
         except (UnidentifiedImageError, Exception):
             error = f"不是有效图片：{upload.filename}"
             continue
+
+        if media_label == "rumor":
+            try:
+                data = stamp_rumor_image(data, upload.content_type or "")
+            except ValueError as exc:
+                error = f"{exc}：{upload.filename}"
+                continue
 
         original = upload.filename or "image"
         stem = _safe_filename_stem(original.rsplit(".", 1)[0])
