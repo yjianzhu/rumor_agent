@@ -706,30 +706,37 @@ def run_pipeline() -> PipelineSummary:
         return summary
 
     summary.keywords = len(keywords)
+    sources = settings.COLLECT_SOURCES
+    if not sources:
+        logger.error("Pipeline: no sources enabled ([collect].sources is empty)")
+        summary.triage_failed = True
+        return summary
     today = date.today()
     yesterday = today - timedelta(days=1)
-    logger.info("Pipeline start: %d keyword(s) %s", len(keywords), list(keywords))
+    logger.info("Pipeline start: %d keyword(s) %s sources=%s", len(keywords), list(keywords), sources)
 
     for kw in keywords:
-        try:
-            out = collect_bilibili(
-                kw,
-                time_start=yesterday.strftime("%Y-%m-%d"),
-                time_end=today.strftime("%Y-%m-%d"),
-            )
-            summary.raw_files.append(out)
-            logger.info("Pipeline bili: %r → %s", kw, out)
-        except Exception as exc:
-            summary.collect_failures.append(f"bili:{kw}: {exc}")
-            logger.warning("Pipeline bili: %r failed: %s", kw, exc)
+        if "bili" in sources:
+            try:
+                out = collect_bilibili(
+                    kw,
+                    time_start=yesterday.strftime("%Y-%m-%d"),
+                    time_end=today.strftime("%Y-%m-%d"),
+                )
+                summary.raw_files.append(out)
+                logger.info("Pipeline bili: %r → %s", kw, out)
+            except Exception as exc:
+                summary.collect_failures.append(f"bili:{kw}: {exc}")
+                logger.warning("Pipeline bili: %r failed: %s", kw, exc)
 
-        try:
-            out = collect_xhs(kw)
-            summary.raw_files.append(out)
-            logger.info("Pipeline xhs:  %r → %s", kw, out)
-        except Exception as exc:
-            summary.collect_failures.append(f"xhs:{kw}: {exc}")
-            logger.warning("Pipeline xhs:  %r failed: %s", kw, exc)
+        if "xhs" in sources:
+            try:
+                out = collect_xhs(kw)
+                summary.raw_files.append(out)
+                logger.info("Pipeline xhs:  %r → %s", kw, out)
+            except Exception as exc:
+                summary.collect_failures.append(f"xhs:{kw}: {exc}")
+                logger.warning("Pipeline xhs:  %r failed: %s", kw, exc)
 
     if not summary.raw_files:
         logger.error("Pipeline: all collectors failed, skipping triage and import")

@@ -51,6 +51,9 @@ retry_delay_range = [3.0, 6.0]
 # 批量采集关键词列表
 # 当 --collect-bili / --collect-xhs 不带参数时，自动遍历此列表
 keywords = ["谣言", "辟谣", "网传"]
+# 启用的采集源，仅作用于 --run-pipeline / --schedule。
+# 服务器若未部署 xiaohongshu-mcp，可设为 ["bili"] 跳过 XHS。
+sources = ["bili", "xhs"]
 # Bilibili 最小播放量过滤，低于此值的视频视为推广/无效内容
 bili_min_play = 100
 

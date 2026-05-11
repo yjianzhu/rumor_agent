@@ -40,6 +40,7 @@ class Config:
     XHS_MAX_RETRIES: int = 3
 
     COLLECT_KEYWORDS: list[str] = field(default_factory=list)
+    COLLECT_SOURCES: list[str] = field(default_factory=lambda: ["bili", "xhs"])
     BILI_MIN_PLAY: int = 100
     BILI_COMMENT_TOP_N: int = 10
     XHS_COMMENT_TOP_N: int = 10
@@ -107,6 +108,7 @@ def _load_config(path: Path = _CONFIG_PATH) -> Config:
         XHS_RETRY_DELAY_RANGE=(float(retry_delay[0]), float(retry_delay[1])),
         XHS_MAX_RETRIES=int(xhs.get("max_retries", 3)),
         COLLECT_KEYWORDS=collect.get("keywords", []),
+        COLLECT_SOURCES=list(collect.get("sources", ["bili", "xhs"])),
         BILI_MIN_PLAY=int(collect.get("bili_min_play", 100)),
         BILI_COMMENT_TOP_N=int(collect.get("bili_comment_top_n", 10)),
         XHS_COMMENT_TOP_N=int(collect.get("xhs_comment_top_n", 10)),
